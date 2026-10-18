@@ -17,6 +17,7 @@
       ASL ASR LSL LSR ROL ROR ROXL ROXR (shift.c)
       BTST BCHG BCLR BSET
       MULU MULS DIVU DIVS, word and long forms (muldiv.c)
+      NEG NEGX NOT ADDX SUBX (negx.c)
 
     Every other opcode returns 0, and the translator stops with a message.
     Condition codes are always computed in full; using Emu68's look-ahead
@@ -684,6 +685,9 @@ static int line4(struct rv_tc *t, uint16_t op)
         return op_movem(t, op);
     if ((op & 0xff00) == 0x4200 && (op & 0xc0) != 0xc0)
         return op_clr(t, op);
+    if (((op & 0xff00) == 0x4000 || (op & 0xff00) == 0x4400 || (op & 0xff00) == 0x4600) &&
+        (op & 0xc0) != 0xc0)
+        return rv_emit_neg_not(t, op);
     if ((op & 0xff00) == 0x4a00 && (op & 0xc0) != 0xc0)
         return op_tst(t, op);
     return 0;
@@ -717,6 +721,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
     case 0x9:
         if ((op & 0xc0) == 0xc0)
             return op_alu_an(t, op, ALU_SUB);
+        if ((op & 0x0130) == 0x0100)
+            return rv_emit_addx_subx(t, op);
         return op_alu_dn(t, op, ALU_SUB);
     case 0xb:
         if ((op & 0xc0) == 0xc0)
@@ -734,6 +740,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
     case 0xd:
         if ((op & 0xc0) == 0xc0)
             return op_alu_an(t, op, ALU_ADD);
+        if ((op & 0x0130) == 0x0100)
+            return rv_emit_addx_subx(t, op);
         return op_alu_dn(t, op, ALU_ADD);
     case 0xe:
         return rv_emit_lineE(t, op);

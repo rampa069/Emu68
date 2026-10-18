@@ -107,6 +107,8 @@ int rv_emit_lineE(struct rv_tc *t, uint16_t opcode);
 int rv_emit_mul_w(struct rv_tc *t, uint16_t opcode);
 int rv_emit_div_w(struct rv_tc *t, uint16_t opcode);
 int rv_emit_muldiv_l(struct rv_tc *t, uint16_t opcode);
+int rv_emit_neg_not(struct rv_tc *t, uint16_t opcode);
+int rv_emit_addx_subx(struct rv_tc *t, uint16_t opcode);
 
 /*
     Set by translated code to an exception vector number when an exception
