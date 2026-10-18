@@ -112,6 +112,26 @@ void rv_emit_write_sr(struct rv_tc *t, uint8_t val)
     t->ended = 1;
 }
 
+/*
+    STOP #imm (0x4e72, privileged): SR = imm, the unit ends at the next
+    instruction and rv_jit_stopped tells the dispatcher to wait for an
+    interrupt (rv_jit_stop_wait).
+*/
+int rv_emit_stop(struct rv_tc *t)
+{
+    uint16_t imm = rv_fetch16(t);
+    rv_emit_priv_check(t);
+    uint8_t k = rv_tmp(t), a = rv_tmp(t);
+    rv_emit_li(t, k, imm);
+    rv_emit_write_sr(t, k);
+    rv_emit_li(t, a, (int64_t)(intptr_t)&rv_jit_stopped);
+    rv_emit(t, rv_addi(k, RV_ZERO, 1));
+    rv_emit(t, rv_sw(k, a, 0));
+    rv_free(t, k);
+    rv_free(t, a);
+    return 1;
+}
+
 /* In user mode take the privilege violation exception and leave the unit. */
 void rv_emit_priv_check(struct rv_tc *t)
 {

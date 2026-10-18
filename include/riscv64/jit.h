@@ -69,8 +69,13 @@ struct M68KState;
 int rv_jit_interrupt(struct M68KState *ctx);
 struct rv_irq_stats {
     uint64_t taken[8];          /* m68k interrupts taken, per level */
+    uint64_t stops;             /* STOP instructions executed */
 };
+/* After STOP: 1 once an unmasked interrupt was taken, -1 if none can come */
+int rv_jit_stop_wait(struct M68KState *ctx);
 extern struct rv_irq_stats rv_irq_stats;
+extern struct M68KState *rv_m68k_ctx;   /* for M68kReportInterrupt */
+void M68kReportInterrupt(int irq);
 
 /*
     Assembly trampoline (src/riscv64/jit/enter.S). With check set it returns

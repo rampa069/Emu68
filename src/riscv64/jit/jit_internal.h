@@ -140,6 +140,7 @@ int rv_emit_sr_imm(struct rv_tc *t, uint16_t opcode);
 /* SR and stack pointers (exception.c) */
 void rv_emit_write_sr(struct rv_tc *t, uint8_t val);   /* ends the unit */
 void rv_emit_priv_check(struct rv_tc *t);
+int rv_emit_stop(struct rv_tc *t);
 void rv_emit_sp_switch(struct rv_tc *t, uint8_t old_sr, uint8_t new_sr);
 void rv_emit_sp_sync(struct rv_tc *t, int store);
 /* Take an exception with a format 0 or 2 frame; sets gp, caller ends the unit */
@@ -151,5 +152,8 @@ void rv_emit_exception(struct rv_tc *t, int vector, int format, uint32_t frame_p
     stops the run and reports it.
 */
 extern volatile uint32_t rv_jit_exception;
+
+/* Set by translated STOP code; the dispatcher then calls rv_jit_stop_wait */
+extern volatile uint32_t rv_jit_stopped;
 
 #endif /* _EMU68_RISCV64_JIT_INTERNAL_H */

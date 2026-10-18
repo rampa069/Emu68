@@ -19,6 +19,8 @@ set(RV64_FILES
     src/riscv64/start.c
     src/riscv64/mmu.c
     src/riscv64/traps.c
+    src/riscv64/timer.c
+    src/riscv64/ipltest_emu.c
     src/riscv64/cache.c
     src/riscv64/insn_decode.c
     src/riscv64/mmio.c

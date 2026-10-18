@@ -54,6 +54,9 @@ struct mmio_device *mmio_find_device(uint32_t addr);
 /* BCM2835 system timer model with a 1 MHz counter from the time CSR. */
 void systimer_emu_init(struct mmio_device *dev, uint32_t base, uint64_t timebase);
 
+/* IPL test register: writes set ctx->INTF.IPL (a test fixture). */
+void ipltest_emu_init(struct mmio_device *dev, uint32_t base);
+
 /* PL011 model forwarding transmitted characters to putc. */
 void pl011_emu_init(struct mmio_device *dev, uint32_t base, void (*putc)(char));
 

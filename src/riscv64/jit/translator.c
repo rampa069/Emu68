@@ -36,6 +36,7 @@ struct rv_unit {
 
 struct rv_jit_stats rv_jit_stats;
 volatile uint32_t rv_jit_exception;
+volatile uint32_t rv_jit_stopped;
 
 static struct rv_unit *cache[HASH_SIZE];
 static uint32_t *code_base, *code_ptr, *code_end;
@@ -214,6 +215,13 @@ int rv_jit_run(struct M68KState *ctx)
             return -1;
         uint32_t bad = rv_jit_enter(ctx, u->code, config.trace);
         rv_jit_stats.executed++;
+        if (rv_jit_stopped) {
+            rv_jit_stopped = 0;
+            if (rv_jit_stop_wait(ctx) < 0)
+                return -1;
+            if (config.trace)
+                kprintf("# stop, then interrupt\n");
+        }
         if (rv_jit_exception) {
             kprintf("[JIT] exception vector %d at %08x: exceptions are not supported by the RV64 translator yet\n",
                 (int)rv_jit_exception, ctx->PC);

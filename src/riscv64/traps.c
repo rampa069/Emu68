@@ -9,10 +9,11 @@
 /*
     Supervisor trap handler, the RV64 counterpart of src/aarch64/vectors.c.
 
-    Load and store page faults in the m68k window are offered to the MMIO
-    emulation first (src/riscv64/mmio.c). Everything else is reported and
-    the machine is shut down through SBI with a failure status; timer and
-    external interrupts are still to come.
+    Supervisor timer interrupts go to src/riscv64/timer.c. Load and store
+    page faults in the m68k window are offered to the MMIO emulation
+    (src/riscv64/mmio.c). Everything else is reported and the machine is
+    shut down through SBI with a failure status; external interrupts (PLIC)
+    are not enabled yet.
 */
 
 #include <stdint.h>
@@ -20,6 +21,7 @@
 #include "cpu_relax.h"
 #include "riscv64/traps.h"
 #include "riscv64/mmio.h"
+#include "riscv64/timer.h"
 
 static const char *cause_name(uint64_t scause)
 {
@@ -55,6 +57,10 @@ void trap_handler(struct trap_frame *f)
     __asm__ volatile("csrr %0, scause" : "=r"(scause));
     __asm__ volatile("csrr %0, stval" : "=r"(stval));
 
+    if (scause == ((1ul << 63) | 5)) {
+        rv_timer_interrupt();
+        return;
+    }
     if ((scause == 13 || scause == 15) && mmio_handle_fault(f, scause, stval))
         return;
 

@@ -23,10 +23,11 @@
 
 #define M68K_PL011_ADDR     0xf2201000
 #define M68K_SYSTIMER_ADDR  0xf2003000
+#define M68K_IPLTEST_ADDR   0xf2fff000      /* test fixture, see ipltest_emu.c */
 
 void virt_console_putc(char c);
 
-static struct mmio_device pl011, systimer;
+static struct mmio_device pl011, systimer, ipltest;
 
 void platform_init()
 {
@@ -36,6 +37,8 @@ void platform_init()
     uint64_t timebase = dt_get_property_value_u32(dt_find_node("/cpus"), "timebase-frequency", 10000000, FALSE);
     systimer_emu_init(&systimer, M68K_SYSTIMER_ADDR, timebase);
     mmio_register(&systimer);
+    ipltest_emu_init(&ipltest, M68K_IPLTEST_ADDR);
+    mmio_register(&ipltest);
 }
 
 void platform_post_init()

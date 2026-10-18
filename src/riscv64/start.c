@@ -31,6 +31,7 @@
 #include "riscv64/mmu_rv.h"
 #include "riscv64/mmio.h"
 #include "riscv64/jit.h"
+#include "riscv64/timer.h"
 
 #define HEAP_SIZE       (16UL << 20)
 #define SZ_2M           (1UL << 21)
@@ -325,15 +326,34 @@ void boot(uint64_t hartid, void *dtb)
                 cfg.icnt = v;
         }
     }
+    /*
+        timer=<us>: periodic supervisor timer, each tick reported to the m68k
+        as an ARM interrupt (level 6, acknowledged through MOVEC JITCTRL2)
+    */
+    uint32_t timer_us = 0;
+    uint64_t timebase = dt_get_property_value_u32(dt_find_node("/cpus"), "timebase-frequency", 10000000, FALSE);
+    if (args) {
+        const char *tm = find_token(args->op_value, "timer=");
+        if (tm)
+            for (const char *c = tm + 6; *c >= '0' && *c <= '9'; c++)
+                timer_us = timer_us * 10 + (uint32_t)(*c - '0');
+    }
+    rv_m68k_ctx = ctx;
+
     void *jit_code = tlsf_malloc_aligned(tlsf, JIT_CODE_SIZE, 4096);
     rv_jit_init(jit_code, JIT_CODE_SIZE, &cfg);
 
     kprintf("[JIT] start pc=%08x isp=%08x icnt=%d%s%s\n", pc, isp, cfg.icnt, cfg.trace ? " trace" : "",
             cfg.flag_liveness ? "" : " noliveness");
     uint64_t t0, t1;
+    if (timer_us) {
+        kprintf("[JIT] timer every %d us\n", (int)timer_us);
+        rv_timer_start(timebase, timer_us);
+    }
     __asm__ volatile("rdtime %0" : "=r"(t0));
     int status = rv_jit_run(ctx);
     __asm__ volatile("rdtime %0" : "=r"(t1));
+    __asm__ volatile("csrc sie, %0" :: "r"(1ul << 5));     /* timer off for the report */
 
     if (status == 0)
         kprintf("[JIT] Back from translated code.\n");
@@ -356,7 +376,15 @@ void boot(uint64_t hartid, void *dtb)
         kprintf("[JIT] Mean RV64 instructions per m68k instruction: %ld.%02ld\n",
             (long)(rv_jit_stats.rv_insns / rv_jit_stats.m68k_insns),
             (long)(rv_jit_stats.rv_insns * 100 / rv_jit_stats.m68k_insns % 100));
-    kprintf("[JIT] Time in m68k code: %ld us\n", (long)((t1 - t0) / 10));
+    kprintf("[JIT] Time in m68k code: %ld us\n", (long)((t1 - t0) * 1000000 / timebase));
+    if (timer_us || rv_irq_stats.stops) {
+        kprintf("[JIT] Timer ticks: %ld, STOPs: %ld, interrupts taken:", (long)rv_timer_ticks,
+            (long)rv_irq_stats.stops);
+        for (int l = 1; l < 8; l++)
+            if (rv_irq_stats.taken[l])
+                kprintf(" level %d x %ld", l, (long)rv_irq_stats.taken[l]);
+        kprintf("\n");
+    }
 
     sbi_shutdown(status != 0);
 }

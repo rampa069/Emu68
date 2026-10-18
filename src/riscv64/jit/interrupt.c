@@ -28,6 +28,7 @@
 #include "support.h"
 #include "M68k.h"
 #include "riscv64/jit.h"
+#include "riscv64/timer.h"
 
 static inline volatile uint8_t *m68k_ptr(uint32_t a)
 {
@@ -55,6 +56,22 @@ static uint32_t read32(uint32_t a)
 }
 
 struct rv_irq_stats rv_irq_stats;
+struct M68KState *rv_m68k_ctx;
+
+/*
+    As in src/ExecutionLoop.c: irq 1 is an ARM-side interrupt (level 6 for
+    the m68k), irq 2 an ARM error (level 7). Called from interrupt context.
+*/
+void M68kReportInterrupt(int irq)
+{
+    struct M68KState *ctx = rv_m68k_ctx;
+    if (!ctx)
+        return;
+    if (irq == 1)
+        ctx->INTF.ARM = 1;
+    else if (irq == 2)
+        ctx->INTF.ARM_err = 1;
+}
 
 int rv_jit_interrupt(struct M68KState *ctx)
 {
@@ -91,4 +108,31 @@ int rv_jit_interrupt(struct M68KState *ctx)
     ctx->PC = read32(ctx->VBR + vector);
     rv_irq_stats.taken[level]++;
     return level;
+}
+
+/*
+    After STOP: wait until an interrupt that the new SR does not mask has
+    been taken. Unlike Emu68 on AArch64, which goes on after STOP as soon as
+    any interrupt is flagged, a masked request keeps the CPU stopped, as on
+    a real 68k. The check and the wfi run with SIE clear, so a tick between
+    them still ends the wfi (it waits for pending enabled interrupts, not for
+    the handler); the handler runs once SIE is set again.
+*/
+int rv_jit_stop_wait(struct M68KState *ctx)
+{
+    rv_irq_stats.stops++;
+    for (;;) {
+        __asm__ volatile("csrc sstatus, %0" :: "r"(1ul << 1) : "memory");
+        if (ctx->INT64 && rv_jit_interrupt(ctx))
+            break;
+        if (!rv_timer_running()) {
+            kprintf("[JIT] STOP at %08x with no interrupt pending and no interrupt source\n", ctx->PC);
+            return -1;
+        }
+        __asm__ volatile("wfi" ::: "memory");
+        __asm__ volatile("csrs sstatus, %0" :: "r"(1ul << 1) : "memory");
+    }
+    if (rv_timer_running())
+        __asm__ volatile("csrs sstatus, %0" :: "r"(1ul << 1) : "memory");
+    return 1;
 }

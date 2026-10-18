@@ -677,6 +677,8 @@ static int line4(struct rv_tc *t, uint16_t op)
         return op_rts(t);
     if (op == 0x4e73)
         return rv_emit_rte(t);
+    if (op == 0x4e72)
+        return rv_emit_stop(t);                 /* STOP (exception.c) */
     if ((op & 0xfff0) == 0x4e60)
         return rv_emit_move_usp(t, op);
     if (op == 0x4e76)

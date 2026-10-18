@@ -45,7 +45,11 @@
 #define CTX_SFC     ((int)offsetof(struct M68KState, SFC))
 #define CTX_DFC     ((int)offsetof(struct M68KState, DFC))
 _Static_assert(offsetof(struct M68KState, CACR) == CTX_CACR, "CACR");
+#define CTX_INTF_ARM    ((int)offsetof(struct M68KState, INTF.ARM))
+#define CTX_INTF_PPC    ((int)offsetof(struct M68KState, INTF.PPC))
+#define CTX_JITCTRL2    ((int)offsetof(struct M68KState, JIT_CONTROL2))
 _Static_assert(offsetof(struct M68KState, DTT1) < 2048, "context offsets fit in 12 bits");
+_Static_assert(offsetof(struct M68KState, JIT_CONTROL2) < 2048, "context offsets fit in 12 bits");
 
 /* 68040 MMU registers: offset, write mask, size of the field */
 struct mmu_reg { uint16_t code; uint16_t off; uint32_t mask; uint8_t size; };
@@ -169,6 +173,43 @@ static int movec(struct rv_tc *t, uint16_t op)
         }
         break;
     }
+    case 0x1e0:                                 /* JITCTRL2 (Emu68) */
+        /*
+            Write: bit 30 acknowledges the PPC interrupt, bit 29 the ARM one
+            (level 6), bits 28-0 are stored; bit 31, which wakes the PowerPC
+            translator, does nothing here. Read: the stored bits with bit 30
+            = INTF.PPC and bit 29 = INTF.ARM (src/M68k_LINE4.c, EMIT_MOVEC).
+        */
+        k = rv_tmp(t);
+        if (to_cr) {
+            uint8_t z = rv_tmp(t);
+            rv_emit(t, rv_bexti(z, r, 30));
+            rv_emit(t, rv_addi(z, z, -1));          /* 0 if bit 30, else -1 */
+            rv_emit(t, rv_lbu(k, RVR_CTX, CTX_INTF_PPC));
+            rv_emit(t, rv_and(k, k, z));
+            rv_emit(t, rv_sb(k, RVR_CTX, CTX_INTF_PPC));
+            rv_emit(t, rv_bexti(z, r, 29));
+            rv_emit(t, rv_addi(z, z, -1));
+            rv_emit(t, rv_lbu(k, RVR_CTX, CTX_INTF_ARM));
+            rv_emit(t, rv_and(k, k, z));
+            rv_emit(t, rv_sb(k, RVR_CTX, CTX_INTF_ARM));
+            rv_emit(t, rv_slli(k, r, 35));
+            rv_emit(t, rv_srli(k, k, 35));          /* bits 28-0 */
+            rv_emit(t, rv_sw(k, RVR_CTX, CTX_JITCTRL2));
+            rv_free(t, z);
+        } else {
+            rv_emit(t, rv_lw(r, RVR_CTX, CTX_JITCTRL2));
+            rv_emit(t, rv_lbu(k, RVR_CTX, CTX_INTF_PPC));
+            rv_emit(t, rv_andi(k, k, 1));
+            rv_emit(t, rv_slli(k, k, 30));
+            rv_emit(t, rv_or(r, r, k));
+            rv_emit(t, rv_lbu(k, RVR_CTX, CTX_INTF_ARM));
+            rv_emit(t, rv_andi(k, k, 1));
+            rv_emit(t, rv_slli(k, k, 29));
+            rv_emit(t, rv_or(r, r, k));
+        }
+        rv_free(t, k);
+        break;
     default:
         for (unsigned i = 0; i < sizeof(mmu_regs) / sizeof(mmu_regs[0]); i++) {
             const struct mmu_reg *m = &mmu_regs[i];
