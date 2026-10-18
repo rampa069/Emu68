@@ -61,6 +61,18 @@ struct rv_jit_stats {
 extern struct rv_jit_stats rv_jit_stats;
 
 /*
+    m68k interrupts (src/riscv64/jit/interrupt.c). The dispatcher calls
+    rv_jit_interrupt between units whenever ctx->INT64 is not zero, with the
+    m68k state stored in the context; it returns the level taken, or 0.
+*/
+struct M68KState;
+int rv_jit_interrupt(struct M68KState *ctx);
+struct rv_irq_stats {
+    uint64_t taken[8];          /* m68k interrupts taken, per level */
+};
+extern struct rv_irq_stats rv_irq_stats;
+
+/*
     Assembly trampoline (src/riscv64/jit/enter.S). With check set it returns
     the mask of m68k registers left not sign-extended by the unit.
 */

@@ -203,6 +203,9 @@ int rv_jit_run(struct M68KState *ctx)
             kprintf("[JIT] exception %d taken with no handler installed\n", vector);
             return 2;
         }
+        /* interrupts are taken between units, where SR is exact */
+        if (ctx->INT64 && rv_jit_interrupt(ctx) && config.trace)
+            kprintf("# interrupt\n");
         if (config.trace)
             trace_record(ctx);
 
