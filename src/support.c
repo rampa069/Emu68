@@ -517,6 +517,8 @@ void kprintf_pc(putc_func putc_f, void *putc_data, const char * restrict format,
     va_end(v);
 }
 
+#if defined(__aarch64__)
+/* Host cache maintenance. The RV64 versions live in src/riscv64/cache.c */
 void arm_flush_cache(uintptr_t addr, uint32_t length)
 {
     int line_size = 0;
@@ -617,6 +619,7 @@ void arm_dcache_invalidate(uintptr_t addr, uint32_t length)
     }
     __asm__ __volatile__("dsb sy");
 }
+#endif /* __aarch64__ */
 
 void putc_s(void *data, char c)
 {
@@ -1041,6 +1044,8 @@ void __attribute__((noreturn)) __assert_fail()
         __asm__ volatile("wfi");
 }
 
+#if defined(__aarch64__)
+/* AArch64 code generation helpers. The RV64 backend has its own in include/riscv64/rv64.h */
 /* Attempt to convert 32-bit number to bitmask encoding, returns 0 if it failed. Always assume N=0 (32-bit mask) */
 uint32_t number_to_mask(uint32_t value)
 {
@@ -1166,3 +1171,4 @@ void EMIT_LoadImmediate(struct TranslatorContext *ctx, uint8_t rd, uint32_t imme
         );
     }
 }
+#endif /* __aarch64__ */

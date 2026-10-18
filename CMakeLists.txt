@@ -2,6 +2,16 @@ cmake_minimum_required(VERSION 3.14.0)
 project(Emu68 VERSION 1.1.0)
 set(PROJECT_VERSION 1.1.0-beta.1)
 
+# The RV64 port has its own build description; the rest of this file is the
+# AArch64 build and is left untouched by it.
+if("${TARGET}" STREQUAL "riscv-virt")
+    include(cmake/verstring.cmake)
+    get_verstring(VERSTRING)
+    get_git_sha(GIT_SHA)
+    include(cmake/riscv64.cmake)
+    return()
+endif()
+
 #set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 include(ExternalProject)
 

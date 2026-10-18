@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include "cpu_relax.h"
 
 typedef struct {
     volatile char lock;
@@ -16,9 +17,9 @@ static inline void spinlock_init(spinlock_t *s) {
 }
 
 static inline void spinlock_acquire(spinlock_t *s) {
-    __asm__ __volatile__("sevl");
+    cpu_spin_prepare();
     while (__atomic_test_and_set(&s->lock, __ATOMIC_ACQUIRE))
-        __asm__ __volatile__("wfe");
+        cpu_spin_wait();
 }
 
 static inline void spinlock_release(spinlock_t *s) {

@@ -18,7 +18,9 @@ extern "C" {
 #include <stdarg.h>
 
 #include "RegLock.h"
+#if defined(__aarch64__)
 #include "A64.h"
+#endif
 
 #ifdef NULL
 #undef NULL
@@ -110,11 +112,19 @@ static inline void wr8(uintptr_t iobase, uint8_t value) {
 }
 
 static inline void dsb() {
+#if defined(__aarch64__)
     __asm__ volatile ("dsb sy");
+#else
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
+#endif
 }
 
 static inline void dmb() {
+#if defined(__aarch64__)
     __asm__ volatile ("dmb sy");
+#else
+    __asm__ volatile ("fence rw, rw" ::: "memory");
+#endif
 }
 
 typedef void (*putc_func)(void *data, char c);

@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include "cpu_relax.h"
 
 typedef struct {
     volatile uint32_t val;
@@ -18,10 +19,10 @@ static inline void doorbell_init(doorbell_t *d) {
 static inline uint32_t doorbell_wait(doorbell_t *d) {
     uint32_t msg;
 
-    __asm__ __volatile__("sevl");
+    cpu_spin_prepare();
     do {
         while ((msg = __atomic_load_n(&d->val, __ATOMIC_ACQUIRE)) == 0) {
-            __asm__ __volatile__("wfe"); // low-power spin
+            cpu_spin_wait(); // low-power spin
         }
         // Try to reset to 0 and claim the message
     } while (!__atomic_compare_exchange_n(&d->val, &msg, 0,

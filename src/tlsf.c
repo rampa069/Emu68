@@ -204,7 +204,7 @@ static inline __attribute__((always_inline)) uintptr_t GET_SIZE(bhdr_t *b)
         kprintf("ERROR! GET_SIZE block %p with size=%p\n", b, size);
         kprintf("  caller %p\n", __builtin_return_address(0));
 
-        while (1) asm volatile("wfe");
+        while (1) cpu_halt();
     }
     return size;
 }
@@ -218,7 +218,7 @@ static inline __attribute__((always_inline)) void SET_SIZE(bhdr_t *b, uintptr_t 
 {
     if (size > 0xffffffff) {
         kprintf("ERROR! SET_SIZE on block %p with size=%p\n", b, size);
-        while (1) asm volatile("wfe");
+        while (1) cpu_halt();
     }
     b->header.length = GET_FLAGS(b) | size;
 }
@@ -227,7 +227,7 @@ static inline __attribute__((always_inline)) void SET_SIZE_AND_FLAGS(bhdr_t *b, 
 {
     if (size > 0xffffffff) {
         kprintf("ERROR! SET_SIZE_AND_FLAGS on block %p with size=%p\n", b, size);
-        while (1) asm volatile("wfe");
+        while (1) cpu_halt();
     }
     b->header.length = size | flags;
 }
@@ -426,7 +426,7 @@ static inline __attribute__((always_inline)) void MERGE(bhdr_t *b1, bhdr_t *b2)
     if (unlikely(new_size > 0xffffffff)) {
         kprintf("[TLSF] ERROR! MERGE overflow: b1=%p (%p) + b2=%p (%p)\n", 
                 b1, GET_SIZE(b1), b2, GET_SIZE(b2));
-        while (1) asm volatile("wfe");
+        while (1) cpu_halt();
     }
     
     SET_SIZE(b1, new_size);
@@ -593,7 +593,7 @@ void tlsf_free(void *t, void *ptr)
     if (unlikely(FREE_BLOCK(fb))) {
         kprintf("[TLSF] ERROR! Double-free detected on block %p\n", ptr);
         kprintf("[TLSF]  caller %p\n", __builtin_return_address(0));
-        while (1) asm volatile("wfe");
+        while (1) cpu_halt();
     }
 
     /* Mark block as free */
