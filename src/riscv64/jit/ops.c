@@ -13,7 +13,7 @@
       ORI ANDI SUBI ADDI EORI CMPI (to an effective address)
       ADD ADDA ADDQ SUB SUBA SUBQ CMP CMPA AND OR EOR
       MOVE from SR, MOVEM, LINK, UNLK
-      Bcc BRA BSR DBcc JMP JSR RTS
+      Bcc BRA BSR DBcc Scc JMP JSR RTS
       ASL ASR LSL LSR ROL ROR ROXL ROXR (shift.c)
       BTST BCHG BCLR BSET
       MULU MULS DIVU DIVS, word and long forms (muldiv.c)
@@ -583,6 +583,25 @@ static int op_bcc(struct rv_tc *t, uint16_t op)
     return 1;
 }
 
+/* Scc <ea>: byte = condition ? 0xff : 0x00; flags unchanged */
+static int op_scc(struct rv_tc *t, uint16_t op)
+{
+    struct rv_ea ea;
+    int mode = EA_MODE(op);
+
+    if (mode == 1 || (mode == 7 && EA_REG(op) > 1))
+        return 0;                           /* DBcc is mode 1; TRAPcc is 7.2-7.4 */
+    if (!rv_ea_decode(t, mode, EA_REG(op), 1, &ea))
+        return 0;
+    uint8_t c = rv_tmp(t);
+    rv_cond(t, (op >> 8) & 15, c);
+    rv_emit(t, rv_neg(c, c));               /* 1 -> 0xff..ff, 0 -> 0 */
+    rv_ea_write(t, &ea, 1, c);
+    rv_ea_done(t, &ea);
+    rv_free(t, c);
+    return 1;
+}
+
 static int op_dbcc(struct rv_tc *t, uint16_t op)
 {
     uint8_t dn = rv_dreg(EA_REG(op));
@@ -708,7 +727,7 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
         if ((op & 0xf0f8) == 0x50c8)
             return op_dbcc(t, op);
         if ((op & 0xc0) == 0xc0)
-            return 0;                           /* Scc, TRAPcc: not yet */
+            return op_scc(t, op);               /* TRAPcc not yet */
         return op_quick(t, op);
     case 0x6:
         return op_bcc(t, op);
