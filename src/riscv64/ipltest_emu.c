@@ -35,8 +35,10 @@ static void ipl_write(struct mmio_device *dev, uint32_t offset, int size, uint64
     (void)dev; (void)offset;
     /* the value arrives in host (little-endian) order: the m68k low byte is the last one */
     uint8_t low = (uint8_t)(value >> (8 * (size - 1)));
-    if (rv_m68k_ctx)
+    if (rv_m68k_ctx) {
+        rv_jit_ipl_changed(rv_m68k_ctx->INTF.IPL, low & 7);
         rv_m68k_ctx->INTF.IPL = low & 7;
+    }
 }
 
 void ipltest_emu_init(struct mmio_device *dev, uint32_t base)

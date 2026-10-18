@@ -83,6 +83,8 @@ extern struct rv_jit_stats rv_jit_stats;
 */
 struct M68KState;
 int rv_jit_interrupt(struct M68KState *ctx);
+/* IPL sources report every change of INTF.IPL, for the level 7 edge */
+void rv_jit_ipl_changed(uint8_t old_level, uint8_t new_level);
 struct rv_irq_stats {
     uint64_t taken[8];          /* m68k interrupts taken, per level */
     uint64_t stops;             /* STOP instructions executed */

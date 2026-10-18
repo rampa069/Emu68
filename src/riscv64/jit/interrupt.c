@@ -22,6 +22,13 @@
 
     The sources keep their flags set until the device is acknowledged, as
     level-triggered interrupt lines do; only ARM_err is cleared here.
+
+    Level 7 from the IPL lines is edge-triggered, as the M68000 User's
+    Manual describes: a rise to 7 (reported by the source through
+    rv_jit_ipl_changed) is taken once even under mask 7, and a held 7 is
+    only taken again through the normal comparison, when the mask is below
+    7. Emu68 on AArch64 takes a held 7 again after every unit, which nests
+    the handler; this follows the hardware (and TG68K.C once fixed).
 */
 
 #include <stdint.h>
@@ -56,6 +63,13 @@ static uint32_t read32(uint32_t a)
 }
 
 struct rv_irq_stats rv_irq_stats;
+static int nmi_pending;         /* a rise of INTF.IPL to 7 not yet taken */
+
+void rv_jit_ipl_changed(uint8_t old_level, uint8_t new_level)
+{
+    if (new_level == 7 && old_level != 7)
+        nmi_pending = 1;
+}
 struct M68KState *rv_m68k_ctx;
 
 /*
@@ -75,7 +89,7 @@ void M68kReportInterrupt(int irq)
 
 int rv_jit_interrupt(struct M68KState *ctx)
 {
-    int level = 0;
+    int level = 0, ipl7 = 0;
 
     if (ctx->INTF.ARM_err) {
         level = 7;
@@ -87,11 +101,20 @@ int rv_jit_interrupt(struct M68KState *ctx)
             level = 2;
         if (ctx->INTF.IPL > level)
             level = ctx->INTF.IPL & 7;
+        ipl7 = level == 7;
     }
 
     uint16_t sr = ctx->SR;
-    if (level == 0 || (level != 7 && level <= ((sr >> 8) & 7)))
+    int mask = (sr >> 8) & 7;
+    if (level == 0)
         return 0;
+    if (ipl7) {
+        if (mask == 7 && !nmi_pending)
+            return 0;                   /* a held 7 under mask 7 */
+        nmi_pending = 0;
+    } else if (level != 7 && level <= mask) {
+        return 0;
+    }
 
     if (!(sr & SR_S)) {
         ctx->USP.u32 = ctx->A[7].u32;
