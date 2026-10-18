@@ -96,11 +96,12 @@ void * LoadHunkFile(void *buffer, void *p, void *virt)
         bzero(h, size + sizeof(struct SegList));
 
         h->h_Next = 0;
-        h->h_Size = size;
+        /* SegList fields are read by m68k code, so they are stored big-endian */
+        h->h_Size = BE32(size);
         if (hunks == NULL)
             hunks = h;
         if (prevhunk != NULL)
-            *(uint32_t*)prevhunk = (uint32_t)((intptr_t)&h->h_Next - (intptr_t)p + (intptr_t)virt);
+            *(uint32_t*)prevhunk = BE32((uint32_t)((intptr_t)&h->h_Next - (intptr_t)p + (intptr_t)virt));
         prevhunk = &h->h_Next;
     }
 
@@ -112,8 +113,8 @@ void * LoadHunkFile(void *buffer, void *p, void *virt)
         while (segments != NULL)
         {
             kprintf("[HUNK]   Hunk %p, size %d, next %p\n",
-                segments, ((uint32_t*)segments)[-1], *(uint32_t*)segments);
-            segments = (void*)((intptr_t)(*(uint32_t*)segments));
+                segments, BE32(((uint32_t*)segments)[-1]), BE32(*(uint32_t*)segments));
+            segments = (void*)((intptr_t)BE32(*(uint32_t*)segments));
         }
     }
 
@@ -182,7 +183,7 @@ void * LoadHunkFile(void *buffer, void *p, void *virt)
                         void *segments = &hunks->h_Next;
                         for (unsigned i=0; i < refcnt; i++)
                         {
-                            segments = (void *)(intptr_t)*(uint32_t*)segments;
+                            segments = (void *)(intptr_t)BE32(*(uint32_t*)segments);
                         }
                         ref_base = (intptr_t)segments + 4 + (intptr_t)virt - (intptr_t)p;
                         words += 2;
@@ -222,7 +223,7 @@ void * LoadHunkFile(void *buffer, void *p, void *virt)
                         void *segments = &hunks->h_Next;
                         for (unsigned i=0; i < refcnt; i++)
                         {
-                            segments = (void*)(intptr_t)(*(uint32_t*)segments);
+                            segments = (void*)(intptr_t)BE32(*(uint32_t*)segments);
                         }
 
                         ref_base = (intptr_t)segments + 4;
@@ -260,7 +261,7 @@ void * LoadHunkFile(void *buffer, void *p, void *virt)
                 D(kprintf("[HUNK] End of block\n"));
                 words++;
                 current_block++;
-                h = (struct SegList *)((uintptr_t)h->h_Next - __builtin_offsetof(struct SegList, h_Next));
+                h = (struct SegList *)((uintptr_t)BE32(h->h_Next) - __builtin_offsetof(struct SegList, h_Next));
                 break;
 
             default:

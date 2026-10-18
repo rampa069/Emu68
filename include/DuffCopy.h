@@ -9,6 +9,10 @@ extern "C" {
 
 static inline __attribute__((always_inline)) void DuffCopy(uint32_t * to, const uint32_t * from, uint32_t count)
 {
+    /* Duff's device copies 8 words and then wraps n for count == 0 */
+    if (count == 0)
+        return;
+
     uint32_t n = (count + 7) / 8;
     switch (count % 8) {
     case 0: do { *to++ = *from++; // Fallthrough
