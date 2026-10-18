@@ -23,6 +23,7 @@ set(RV64_FILES
     src/riscv64/insn_decode.c
     src/riscv64/mmio.c
     src/riscv64/pl011_emu.c
+    src/riscv64/systimer_emu.c
     src/riscv64/jit/enter.S
     src/riscv64/jit/translator.c
     src/riscv64/jit/codegen.c

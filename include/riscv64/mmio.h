@@ -51,6 +51,9 @@ int mmio_handle_fault(struct trap_frame *f, uint64_t scause, uint64_t stval);
 /* Device covering an m68k address, or NULL. */
 struct mmio_device *mmio_find_device(uint32_t addr);
 
+/* BCM2835 system timer model with a 1 MHz counter from the time CSR. */
+void systimer_emu_init(struct mmio_device *dev, uint32_t base, uint64_t timebase);
+
 /* PL011 model forwarding transmitted characters to putc. */
 void pl011_emu_init(struct mmio_device *dev, uint32_t base, void (*putc)(char));
 
