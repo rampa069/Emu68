@@ -36,6 +36,7 @@ set(RV64_FILES
     src/riscv64/jit/flags.c
     src/riscv64/jit/bcd.c
     src/riscv64/jit/cas.c
+    src/riscv64/jit/bitfield.c
     src/riscv-virt/start_virt.c
     src/riscv-virt/support_virt.c
     src/support.c

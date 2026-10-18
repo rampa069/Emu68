@@ -142,7 +142,7 @@ static uint32_t sr_usage(uint16_t op)
     case 0xe:
         if (size == 3) {
             if (op & 0x0800)
-                return DEFAULT;                             /* bitfields */
+                return USE(0, NZVC);                        /* bit fields */
             switch ((op >> 9) & 3) {                        /* memory, count 1 */
             case 0: case 1: return USE(0, ALL);             /* ASx LSx */
             case 2:         return USE(X, ALL);             /* ROXx */

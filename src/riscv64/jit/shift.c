@@ -241,6 +241,6 @@ int rv_emit_lineE(struct rv_tc *t, uint16_t op)
     if ((op & 0xc0) != 0xc0)
         return shift_reg(t, op);
     if (op & 0x0800)
-        return 0;                       /* 68020 bitfield instructions: not yet */
+        return rv_emit_bitfield(t, op); /* 68020 bit fields (bitfield.c) */
     return shift_mem(t, op);
 }

@@ -691,13 +691,14 @@ static int line4(struct rv_tc *t, uint16_t op)
         return op_jmp_jsr(t, op, 0);
     if ((op & 0xffc0) == 0x4e80)
         return op_jmp_jsr(t, op, 1);
+    /* CHK before EXT: CHK.W <ea>,D4 (0x4980) also matches the EXT pattern */
+    if ((op & 0xf140) == 0x4100)
+        return rv_emit_chk(t, op);              /* CHK.L, CHK.W (exception.c) */
     /* EXT/EXTB before LEA: EXTB.L (0x49c0) also matches the LEA pattern */
     if ((op & 0xfeb8) == 0x4880 || (op & 0xfff8) == 0x49c0)
         return op_ext(t, op);
     if ((op & 0xf1c0) == 0x41c0)
         return op_lea(t, op);
-    if ((op & 0xf140) == 0x4100)
-        return rv_emit_chk(t, op);              /* CHK.L, CHK.W (exception.c) */
     if ((op & 0xffc0) == 0x4800)
         return rv_emit_nbcd(t, op);             /* NBCD (bcd.c) */
     if ((op & 0xf9c0) == 0x40c0 || (op & 0xfffe) == 0x4e7a)
