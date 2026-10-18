@@ -114,6 +114,13 @@ int rv_emit_trapv(struct rv_tc *t);
 int rv_emit_trapcc(struct rv_tc *t, uint16_t opcode);
 int rv_emit_rte(struct rv_tc *t);
 int rv_emit_move_usp(struct rv_tc *t, uint16_t opcode);
+int rv_emit_sr_op(struct rv_tc *t, uint16_t opcode);
+int rv_emit_sr_imm(struct rv_tc *t, uint16_t opcode);
+/* SR and stack pointers (exception.c) */
+void rv_emit_write_sr(struct rv_tc *t, uint8_t val);   /* ends the unit */
+void rv_emit_priv_check(struct rv_tc *t);
+void rv_emit_sp_switch(struct rv_tc *t, uint8_t old_sr, uint8_t new_sr);
+void rv_emit_sp_sync(struct rv_tc *t, int store);
 /* Take an exception with a format 0 or 2 frame; sets gp, caller ends the unit */
 void rv_emit_exception(struct rv_tc *t, int vector, int format, uint32_t frame_pc, uint32_t insn);
 

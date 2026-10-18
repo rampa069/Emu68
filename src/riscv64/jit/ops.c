@@ -229,17 +229,6 @@ static int op_swap(struct rv_tc *t, uint16_t op)
     return 1;
 }
 
-static int op_move_from_sr(struct rv_tc *t, uint16_t op)
-{
-    struct rv_ea ea;
-
-    if (EA_MODE(op) == 1 || !rv_ea_decode(t, EA_MODE(op), EA_REG(op), 2, &ea) || ea.kind == EA_IMM)
-        return 0;
-    rv_ea_write(t, &ea, 2, RVR_SR);
-    rv_ea_done(t, &ea);
-    return 1;
-}
-
 static int op_movem(struct rv_tc *t, uint16_t op)
 {
     int to_regs = (op >> 10) & 1;
@@ -441,7 +430,7 @@ static int op_immediate(struct rv_tc *t, uint16_t op)
     if (kind < 0 || !size || (op & 0x0100) || EA_MODE(op) == 1)
         return 0;
     if (EA_MODE(op) == 7 && EA_REG(op) == 4)
-        return 0;                       /* to CCR / SR: not yet */
+        return rv_emit_sr_imm(t, op);   /* to CCR / SR (sr.c) */
 
     int64_t imm = size == 4 ? (int32_t)rv_fetch32(t)
                 : size == 2 ? (int16_t)rv_fetch16(t) : (int8_t)(rv_fetch16(t) & 0xff);
@@ -703,8 +692,8 @@ static int line4(struct rv_tc *t, uint16_t op)
         return op_ext(t, op);
     if ((op & 0xf1c0) == 0x41c0)
         return op_lea(t, op);
-    if ((op & 0xffc0) == 0x40c0)
-        return op_move_from_sr(t, op);
+    if ((op & 0xf9c0) == 0x40c0 || (op & 0xfffe) == 0x4e7a)
+        return rv_emit_sr_op(t, op);            /* SR, CCR, MOVEC (sr.c) */
     if ((op & 0xfff8) == 0x4840)
         return op_swap(t, op);
     if ((op & 0xffc0) == 0x4840)

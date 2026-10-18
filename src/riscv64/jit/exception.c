@@ -10,7 +10,8 @@
     Exception processing for the RV64 translator, emitted inline:
 
       1. the old SR is kept, S is set and T1/T0 cleared; coming from user
-         mode, A7 is saved as USP and the interrupt stack pointer loaded
+         mode, A7 is saved as USP and the supervisor stack pointer (ISP, or
+         MSP when M is set) loaded
       2. a 68020 stack frame is pushed on the supervisor stack:
            format $0: SR, PC, 0000 | vector*4
            format $2: SR, PC, 2000 | vector*4, address of the instruction
@@ -21,9 +22,13 @@
 
     RTE pops SR and PC and discards the rest of a format $0 or $2 frame;
     any other format stops the run (format error is not modelled yet).
-    Returning to user mode saves A7 as ISP and loads USP.
+    The stack pointer follows the new S and M bits.
 
-    The master stack (M bit) and trace (T bits) are not modelled.
+    Privileged instructions run rv_emit_priv_check first, which takes the
+    privilege violation exception (vector 8, format $0, PC of the
+    instruction) in user mode.
+
+    Trace (T1/T0) is kept in SR but not modelled.
 */
 
 #include <stddef.h>
@@ -33,13 +38,94 @@
 #include "jit_internal.h"
 
 #define CTX_USP 64
+#define CTX_MSP 68
 #define CTX_ISP 72
 #define CTX_VBR 84
 _Static_assert(offsetof(struct M68KState, USP) == CTX_USP, "USP");
+_Static_assert(offsetof(struct M68KState, MSP) == CTX_MSP, "MSP");
 _Static_assert(offsetof(struct M68KState, ISP) == CTX_ISP, "ISP");
 _Static_assert(offsetof(struct M68KState, VBR) == CTX_VBR, "VBR");
 
 #define SR_S    0x2000
+#define SR_MASK 0xf71f      /* T1 T0 S M - I2 I1 I0 - - - X N Z V C (68020) */
+
+/*
+    rd = RVR_CTX + (offset of the stack pointer slot for SR value sr) - CTX_USP:
+    USP when S = 0, ISP when S = 1 and M = 0, MSP when S = 1 and M = 1,
+    that is CTX_USP + 8 * S - 4 * (S & M).
+*/
+static void sp_slot(struct rv_tc *t, uint8_t rd, uint8_t sr, uint8_t k)
+{
+    rv_emit(t, rv_bexti(rd, sr, 13));
+    rv_emit(t, rv_bexti(k, sr, 12));
+    rv_emit(t, rv_and(k, k, rd));
+    rv_emit(t, rv_sh3add(rd, rd, RVR_CTX));
+    rv_emit(t, rv_slli(k, k, 2));
+    rv_emit(t, rv_sub(rd, rd, k));
+}
+
+/*
+    Switch A7 from the stack of old_sr to the stack of new_sr. Always stores
+    and reloads, so no branch is needed when the stack does not change.
+*/
+void rv_emit_sp_switch(struct rv_tc *t, uint8_t old_sr, uint8_t new_sr)
+{
+    uint8_t sp = rv_areg(7);
+    uint8_t a = rv_tmp(t), k = rv_tmp(t);
+
+    sp_slot(t, a, old_sr, k);
+    rv_emit(t, rv_sw(sp, a, CTX_USP));
+    sp_slot(t, a, new_sr, k);
+    rv_emit(t, rv_lw(sp, a, CTX_USP));
+    rv_free(t, a);
+    rv_free(t, k);
+}
+
+/* Store A7 to (store = 1) or load it from (store = 0) the slot of the current SR. */
+void rv_emit_sp_sync(struct rv_tc *t, int store)
+{
+    uint8_t sp = rv_areg(7);
+    uint8_t a = rv_tmp(t), k = rv_tmp(t);
+
+    sp_slot(t, a, RVR_SR, k);
+    rv_emit(t, store ? rv_sw(sp, a, CTX_USP) : rv_lw(sp, a, CTX_USP));
+    rv_free(t, a);
+    rv_free(t, k);
+}
+
+/*
+    Write val to SR (masked to the 68020 bits), switch stacks if S or M
+    changed and end the unit at the next instruction, as Emu68 does, so that
+    a pending interrupt can be taken once interrupts exist.
+*/
+void rv_emit_write_sr(struct rv_tc *t, uint8_t val)
+{
+    uint8_t old = rv_tmp(t), k = rv_tmp(t);
+
+    rv_emit(t, rv_mv(old, RVR_SR));
+    rv_emit_li(t, k, SR_MASK);
+    rv_emit(t, rv_and(RVR_SR, val, k));
+    rv_free(t, k);
+    rv_emit_sp_switch(t, old, RVR_SR);
+    rv_free(t, old);
+    rv_emit_li(t, RVR_PC, (int32_t)t->cursor);
+    t->ended = 1;
+}
+
+/* In user mode take the privilege violation exception and leave the unit. */
+void rv_emit_priv_check(struct rv_tc *t)
+{
+    uint8_t k = rv_tmp(t);
+    uint32_t *b = t->ptr;
+
+    rv_emit(t, rv_bexti(k, RVR_SR, 13));
+    rv_emit(t, rv_bnez(k, 0));
+    rv_free(t, k);
+    rv_emit_exception(t, 8, 0, t->pc, t->pc);
+    rv_emit(t, rv_ret());
+    if (!t->overflow)
+        b[1] = rv_patch_b(b[1], (int32_t)((t->ptr - (b + 1)) * 4));
+}
 
 static void push(struct rv_tc *t, int size, uint8_t val)
 {
@@ -57,24 +143,15 @@ static void push(struct rv_tc *t, int size, uint8_t val)
 void rv_emit_exception(struct rv_tc *t, int vector, int format, uint32_t frame_pc, uint32_t insn)
 {
     uint8_t old = rv_tmp(t), k = rv_tmp(t);
-    uint8_t sp = rv_areg(7);
 
     rv_emit(t, rv_mv(old, RVR_SR));
 
-    /* from user mode: switch to the interrupt stack */
-    uint32_t *b = t->ptr;
-    rv_emit(t, rv_bexti(k, old, 13));
-    rv_emit(t, rv_bnez(k, 0));
-    rv_emit(t, rv_sw(sp, RVR_CTX, CTX_USP));
-    rv_emit(t, rv_lw(sp, RVR_CTX, CTX_ISP));
-    if (!t->overflow)
-        b[1] = rv_patch_b(b[1], (int32_t)((t->ptr - (b + 1)) * 4));
-
-    /* S = 1, T1 = T0 = 0 */
+    /* S = 1, T1 = T0 = 0; from user mode switch to ISP or MSP */
     rv_emit_li(t, k, SR_S);
     rv_emit(t, rv_or(RVR_SR, RVR_SR, k));
     rv_emit_li(t, k, 0x3fff);
     rv_emit(t, rv_and(RVR_SR, RVR_SR, k));
+    rv_emit_sp_switch(t, old, RVR_SR);
 
     if (format == 2) {
         rv_emit_li(t, k, (int32_t)insn);
@@ -93,10 +170,12 @@ void rv_emit_exception(struct rv_tc *t, int vector, int format, uint32_t frame_p
     rv_free(t, k);
 }
 
-/* RTE (supervisor only: privilege checks come with the SR instructions) */
+/* RTE (privileged) */
 int rv_emit_rte(struct rv_tc *t)
 {
     uint8_t sp = rv_areg(7);
+
+    rv_emit_priv_check(t);
     uint8_t sr = rv_tmp(t), f = rv_tmp(t), k = rv_tmp(t);
 
     rv_load68(t, 2, sr, sp, 0);
@@ -126,15 +205,11 @@ int rv_emit_rte(struct rv_tc *t)
         *is2 = rv_patch_b(*is2, (int32_t)((l2 - is2) * 4));
     }
 
-    rv_emit(t, rv_mv(RVR_SR, sr));
-    /* back to user mode: save ISP, load USP */
-    uint32_t *b = t->ptr;
-    rv_emit(t, rv_bexti(k, sr, 13));
-    rv_emit(t, rv_bnez(k, 0));
-    rv_emit(t, rv_sw(sp, RVR_CTX, CTX_ISP));
-    rv_emit(t, rv_lw(sp, RVR_CTX, CTX_USP));
-    if (!t->overflow)
-        b[1] = rv_patch_b(b[1], (int32_t)((t->ptr - (b + 1)) * 4));
+    /* new SR, then follow S and M to the right stack */
+    rv_emit(t, rv_mv(f, RVR_SR));
+    rv_emit_li(t, k, SR_MASK);
+    rv_emit(t, rv_and(RVR_SR, sr, k));
+    rv_emit_sp_switch(t, f, RVR_SR);
 
     rv_free(t, sr);
     rv_free(t, f);
@@ -144,14 +219,13 @@ int rv_emit_rte(struct rv_tc *t)
 }
 
 /*
-    MOVE An,USP (0x4e60) and MOVE USP,An (0x4e68). The USP lives in the
-    context while in supervisor mode. Privilege violations are checked once
-    the SR instructions and user mode are translated; for now the
-    instruction is assumed to run in supervisor mode.
+    MOVE An,USP (0x4e60) and MOVE USP,An (0x4e68), privileged. The USP lives
+    in the context while in supervisor mode.
 */
 int rv_emit_move_usp(struct rv_tc *t, uint16_t op)
 {
     uint8_t an = rv_areg(op & 7);
+    rv_emit_priv_check(t);
     if (op & 0x08)
         rv_emit(t, rv_lw(an, RVR_CTX, CTX_USP));
     else
