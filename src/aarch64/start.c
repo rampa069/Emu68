@@ -801,6 +801,22 @@ void parse_cmdline(const char *cmdline)
 #endif
 }
 
+/*
+    Read an address property that may be one or two cells wide. The RasPi
+    firmware stores linux,initrd-start/end as 32-bit values while QEMU virt
+    (#address-cells = 2) stores them as 64-bit values. Cells are only 4-byte
+    aligned, so a 64-bit value is assembled from two 32-bit reads.
+*/
+static uintptr_t dt_read_address(of_property_t *p)
+{
+    const uint32_t *cell = (const uint32_t *)p->op_value;
+
+    if (p->op_length >= 8)
+        return ((uint64_t)BE32(cell[0]) << 32) | BE32(cell[1]);
+
+    return BE32(cell[0]);
+}
+
 void boot(void *dtree)
 {
     uintptr_t kernel_top_virt = ((uintptr_t)boot + (KERNEL_SYS_PAGES << 21)) & ~((1 << 21)-1);
@@ -1135,9 +1151,9 @@ void boot(void *dtree)
 
         if (p)
         {
-            image_start = (void*)(intptr_t)BE32(*(uint32_t*)p->op_value);
+            image_start = (void*)dt_read_address(p);
             p = dt_find_property(e, "linux,initrd-end");
-            image_end = (void*)(intptr_t)BE32(*(uint32_t*)p->op_value);
+            image_end = (void*)dt_read_address(p);
 
             initramfs_size = (uintptr_t)image_end - (uintptr_t)image_start;
             initramfs_loc = tlsf_malloc(tlsf, (initramfs_size + 3) & ~3);

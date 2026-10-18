@@ -70,6 +70,28 @@ void vkprintf(const char * restrict format, va_list args)
     vkprintf_pc(putByte, (void*)0x09000000, format, args);
 }
 
+/*
+    Fortified printf from libraries built with _FORTIFY_SOURCE (capstone).
+    The RasPi target provides its own in support_rpi.c.
+*/
+void __printf_chk(int flag, const char * restrict format, ...)
+{
+    (void)flag;
+    va_list v;
+    va_start(v, format);
+    vkprintf_pc(putByte, (void*)0x09000000, format, v);
+    va_end(v);
+}
+
+/*
+    The virt machine has no framebuffer. start.c and the PPC loop still
+    reference these symbols, which on RasPi come from start_rpi64.c.
+*/
+uint16_t *framebuffer = NULL;
+uint32_t pitch = 0;
+uint32_t fb_width = 0;
+uint32_t fb_height = 0;
+
 void setup_serial()
 {
     serial_up = 1;
