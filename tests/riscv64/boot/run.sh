@@ -16,11 +16,11 @@ trap 'kill "${QPID:-}" 2>/dev/null || true; rm -rf "${WORK}"' EXIT
 
 "${QEMU}" -M virt -m 512 -display none -no-shutdown \
     -monitor "unix:${WORK}/mon,server,nowait" -serial "file:${WORK}/serial" \
-    -kernel "${ELF}" -initrd "${PROG}" -append "mmio_selftest" &
+    -kernel "${ELF}" -initrd "${PROG}" -append "mmio_selftest norun" &
 QPID=$!
 
 for ((i = 0; i < 300; i++)); do
-    grep -qE "stopping before MainLoop|\[TRAP\]" "${WORK}/serial" 2>/dev/null && break
+    grep -qE "stopping before the translator|\[TRAP\]" "${WORK}/serial" 2>/dev/null && break
     perl -e 'select(undef, undef, undef, 0.1)'
 done
 tr -d '\r' < "${WORK}/serial"

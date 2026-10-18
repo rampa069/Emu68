@@ -15,8 +15,9 @@
     and loads the HUNK executable passed as initrd, exactly as the AArch64
     build does without PiStorm.
 
-    The RV64 translator does not exist yet, so the boot stops where
-    M68K_StartEmu() would enter MainLoop and reports the m68k entry state.
+    The m68k program then runs on the RV64 translator (src/riscv64/jit)
+    until it returns to PC 0, and the final m68k context is printed in the
+    same format as on AArch64.
 */
 
 #include <stdint.h>
@@ -29,10 +30,12 @@
 #include "version.h"
 #include "riscv64/mmu_rv.h"
 #include "riscv64/mmio.h"
+#include "riscv64/jit.h"
 
 #define HEAP_SIZE       (16UL << 20)
 #define SZ_2M           (1UL << 21)
 #define M68K_RAM_LIMIT  0xf2000000UL    /* keep the peripheral window free */
+#define JIT_CODE_SIZE   (4UL << 20)
 
 extern char __image_start[], __image_end[];
 
@@ -266,17 +269,76 @@ void boot(uint64_t hartid, void *dtb)
     const uint32_t *w = initrd;
     uint32_t nhunks = BE32(w[4]) - BE32(w[3]) + 1;
     const uint32_t *code = w + 5 + nhunks;
+    uint32_t code_bytes = 4 * (BE32(code[1]) & 0x3fffffff);
     int code_ok = BE32(code[0]) == 0x3e9 &&
-        bytes_equal((void *)(uintptr_t)pc, &code[2], 16);
+        bytes_equal((void *)(uintptr_t)pc, &code[2], code_bytes < 16 ? code_bytes : 16);
 
     const uint8_t *op = (const uint8_t *)(uintptr_t)pc;
     kprintf("[BOOT] Entry %08x: %02x%02x %02x%02x %02x%02x %02x%02x, %s the HUNK_CODE data\n",
         pc, op[0], op[1], op[2], op[3], op[4], op[5], op[6], op[7],
         code_ok ? "matches" : "DOES NOT match");
 
-    uint32_t isp = ((uint32_t)(uintptr_t)hunks - 4096) & 0xfffff000;
-    kprintf("[JIT] m68k entry state: PC=%08x ISP=%08x SR=2700\n", pc, isp);
-    kprintf("[JIT] The RV64 translator is not available yet, stopping before MainLoop\n");
+    if (!code_ok)
+        sbi_shutdown(1);
+    if (args && find_token(args->op_value, "norun")) {
+        kprintf("[JIT] norun: stopping before the translator\n");
+        sbi_shutdown(0);
+    }
 
-    sbi_shutdown(!code_ok);
+    /* m68k start state, as M68K_StartEmu sets it up without PiStorm */
+    uint32_t isp = (((uint32_t)(uintptr_t)hunks - 4096) & 0xfffff000) - 4;
+    *(volatile uint32_t *)(intptr_t)(int32_t)isp = 0;      /* return address 0 */
+
+    struct M68KState *ctx = tlsf_malloc(tlsf, sizeof(*ctx));
+    for (unsigned i = 0; i < sizeof(*ctx); i++)
+        ((uint8_t *)ctx)[i] = 0;
+    ctx->PC = pc;
+    ctx->ISP.u32 = isp;
+    ctx->A[7].u32 = isp;
+    ctx->SR = 0x2700;
+
+    struct rv_jit_config cfg = { .icnt = 256, .trace = 0 };
+    if (args) {
+        const char *cmdline = args->op_value;
+        cfg.trace = find_token(cmdline, "trace") != NULL;
+        const char *icnt = find_token(cmdline, "ICNT=");
+        if (icnt) {
+            int v = 0;
+            for (const char *c = icnt + 5; *c >= '0' && *c <= '9'; c++)
+                v = v * 10 + (*c - '0');
+            if (v >= 1 && v <= 256)
+                cfg.icnt = v;
+        }
+    }
+    void *jit_code = tlsf_malloc_aligned(tlsf, JIT_CODE_SIZE, 4096);
+    rv_jit_init(jit_code, JIT_CODE_SIZE, &cfg);
+
+    kprintf("[JIT] start pc=%08x isp=%08x icnt=%d%s\n", pc, isp, cfg.icnt, cfg.trace ? " trace" : "");
+    uint64_t t0, t1;
+    __asm__ volatile("rdtime %0" : "=r"(t0));
+    int status = rv_jit_run(ctx);
+    __asm__ volatile("rdtime %0" : "=r"(t1));
+
+    if (status == 0)
+        kprintf("[JIT] Back from translated code.\n");
+    else
+        kprintf("[JIT] Stopped at %08x.\n", ctx->PC);
+    kprintf("[JIT] M68K Context:\n");
+    for (int i = 0; i < 8; i += 4)
+        kprintf("[JIT]     D%d = 0x%08x    D%d = 0x%08x    D%d = 0x%08x    D%d = 0x%08x\n",
+            i, ctx->D[i].u32, i + 1, ctx->D[i + 1].u32, i + 2, ctx->D[i + 2].u32, i + 3, ctx->D[i + 3].u32);
+    for (int i = 0; i < 8; i += 4)
+        kprintf("[JIT]     A%d = 0x%08x    A%d = 0x%08x    A%d = 0x%08x    A%d = 0x%08x\n",
+            i, ctx->A[i].u32, i + 1, ctx->A[i + 1].u32, i + 2, ctx->A[i + 2].u32, i + 3, ctx->A[i + 3].u32);
+    kprintf("[JIT]     PC = 0x%08x    SR = 0x%04x\n", ctx->PC, ctx->SR);
+    kprintf("[JIT] %ld units, %ld m68k instructions translated into %ld RV64 instructions, %ld units executed\n",
+        (long)rv_jit_stats.units, (long)rv_jit_stats.m68k_insns, (long)rv_jit_stats.rv_insns,
+        (long)rv_jit_stats.executed);
+    if (rv_jit_stats.m68k_insns)
+        kprintf("[JIT] Mean RV64 instructions per m68k instruction: %ld.%02ld\n",
+            (long)(rv_jit_stats.rv_insns / rv_jit_stats.m68k_insns),
+            (long)(rv_jit_stats.rv_insns * 100 / rv_jit_stats.m68k_insns % 100));
+    kprintf("[JIT] Time in m68k code: %ld us\n", (long)((t1 - t0) / 10));
+
+    sbi_shutdown(status != 0);
 }

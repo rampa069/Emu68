@@ -12,10 +12,13 @@
     0x0000000000000000 - 0x00000000ffffffff  m68k address space (4 GiB)
     0xffffffc000000000 + phys                linear map of physical memory,
                                              the kernel runs here
-    0xffffffff80000000 - 0xffffffffffffffff  mirror of m68k 0x80000000 -
-                                             0xffffffff, so that a 68k address
-                                             held sign-extended (the result of
-                                             addw) is still a valid pointer
+    0xffffffff00000000 - 0xffffffffffffffff  mirror of the whole m68k window.
+                                             A 68k address held sign-extended
+                                             (the result of addw) is a valid
+                                             pointer, and so is any sum of such
+                                             an address and a sign-extended
+                                             displacement, which lies in
+                                             [-4 GiB, 4 GiB)
 
     mmu_map() takes RV_MMU_* attributes in attr_low; attr_high is unused.
     Memory types come from the platform PMAs (Svpbmt is not assumed).

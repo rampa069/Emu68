@@ -33,7 +33,7 @@
 #define PTE_IS_LEAF(e) (((e) & PTE_RWX) != 0)
 
 #define ROOT_LINEAR 256     /* 0xffffffc000000000 */
-#define ROOT_MIRROR 510     /* 0xffffffff80000000 */
+#define ROOT_MIRROR 508     /* 0xffffffff00000000 */
 
 #define SZ_2M       (1UL << 21)
 #define SZ_4K       (1UL << 12)
@@ -78,11 +78,16 @@ void mmu_init()
 
     for (int t = 0; t < 4; t++)
         mmu_root[t] = PTE_PPN(RV_VIRT_TO_PHYS(&mmu_68k_l1[t][0])) | PTE_V;
-    mmu_root[ROOT_MIRROR] = mmu_root[2];
-    mmu_root[ROOT_MIRROR + 1] = mmu_root[3];
+    /*
+        Mirror the whole window at -4 GiB..0. A sign-extended 68k address plus
+        a sign-extended displacement, added in 64 bits, always lands in
+        [-4 GiB, 4 GiB) and so on a mapping of the right 68k page.
+    */
+    for (int t = 0; t < 4; t++)
+        mmu_root[ROOT_MIRROR + t] = mmu_root[t];
     sfence_all();
 
-    kprintf("[MMU] Sv39 root at %p, m68k window 0-4G mirrored at 0xffffffff80000000\n",
+    kprintf("[MMU] Sv39 root at %p, m68k window 0-4G mirrored at 0xffffffff00000000\n",
         (void *)root_phys);
 }
 
