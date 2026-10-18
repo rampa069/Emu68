@@ -59,8 +59,11 @@ struct rv_jit_stats {
 };
 extern struct rv_jit_stats rv_jit_stats;
 
-/* Assembly trampoline (src/riscv64/jit/enter.S) */
-void rv_jit_enter(struct M68KState *ctx, void *code);
+/*
+    Assembly trampoline (src/riscv64/jit/enter.S). With check set it returns
+    the mask of m68k registers left not sign-extended by the unit.
+*/
+uint32_t rv_jit_enter(struct M68KState *ctx, void *code, int check);
 
 #endif /* __ASSEMBLER__ */
 

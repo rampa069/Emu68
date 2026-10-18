@@ -35,6 +35,7 @@ struct rv_unit {
 };
 
 struct rv_jit_stats rv_jit_stats;
+volatile uint32_t rv_jit_exception;
 
 static struct rv_unit *cache[HASH_SIZE];
 static uint32_t *code_base, *code_ptr, *code_end;
@@ -156,7 +157,18 @@ int rv_jit_run(struct M68KState *ctx)
         struct rv_unit *u = lookup(ctx->PC);
         if (u == NULL && (u = translate(ctx->PC)) == NULL)
             return -1;
-        rv_jit_enter(ctx, u->code);
+        uint32_t bad = rv_jit_enter(ctx, u->code, config.trace);
         rv_jit_stats.executed++;
+        if (rv_jit_exception) {
+            kprintf("[JIT] exception vector %d at %08x: exceptions are not supported by the RV64 translator yet\n",
+                (int)rv_jit_exception, ctx->PC);
+            rv_jit_exception = 0;
+            return -1;
+        }
+        if (bad) {
+            /* the translated code broke the canonical register invariant */
+            kprintf("[JIT] non-canonical register mask %04x after the unit at %08x\n", bad, u->pc);
+            return -1;
+        }
     }
 }

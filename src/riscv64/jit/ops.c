@@ -15,6 +15,8 @@
       MOVE from SR, MOVEM, LINK, UNLK
       Bcc BRA BSR DBcc JMP JSR RTS
       ASL ASR LSL LSR ROL ROR ROXL ROXR (shift.c)
+      BTST BCHG BCLR BSET
+      MULU MULS DIVU DIVS, word and long forms (muldiv.c)
 
     Every other opcode returns 0, and the translator stops with a message.
     Condition codes are always computed in full; using Emu68's look-ahead
@@ -457,6 +459,65 @@ static int op_immediate(struct rv_tc *t, uint16_t op)
     return 1;
 }
 
+/*
+    BTST BCHG BCLR BSET, dynamic (bit number in Dn) and static (in an
+    extension word that precedes the effective address extensions). On a
+    data register the operation is on 32 bits with the bit number modulo 32,
+    on memory it is on a byte, modulo 8. Only Z changes: it is set when the
+    tested bit was 0.
+*/
+static int op_bit(struct rv_tc *t, uint16_t op)
+{
+    int kind = (op >> 6) & 3;               /* 0 BTST, 1 BCHG, 2 BCLR, 3 BSET */
+    int mode = EA_MODE(op);
+    int is_static = !(op & 0x0100);
+    struct rv_ea ea;
+    int owned;
+
+    if (mode == 1)
+        return 0;                           /* MOVEP */
+    if (kind != 0 && (mode == 7 && EA_REG(op) >= 2))
+        return 0;                           /* only BTST takes PC-relative and immediate */
+    if (is_static && mode == 7 && EA_REG(op) == 4)
+        return 0;                           /* BTST #n,#imm is not a valid encoding */
+
+    int size = mode == 0 ? 4 : 1;
+    uint8_t b = rv_tmp(t);
+    if (is_static)
+        rv_emit(t, rv_addi(b, 0, rv_fetch16(t) & (size == 4 ? 31 : 7)));
+    else
+        rv_emit(t, rv_andi(b, rv_dreg((op >> 9) & 7), size == 4 ? 31 : 7));
+
+    if (!rv_ea_decode(t, mode, EA_REG(op), size, &ea)) {
+        rv_free(t, b);
+        return 0;
+    }
+    uint8_t v = rv_ea_read(t, &ea, size, &owned);
+
+    /* Z = !bit */
+    uint8_t z = rv_tmp(t);
+    rv_emit(t, rv_bext(z, v, b));
+    rv_emit(t, rv_seqz(z, z));
+    rv_emit(t, rv_slli(z, z, 2));
+    rv_emit(t, rv_andi(RVR_SR, RVR_SR, ~CCR_Z));
+    rv_emit(t, rv_or(RVR_SR, RVR_SR, z));
+    rv_free(t, z);
+
+    if (kind != 0) {
+        uint8_t r = rv_tmp(t);
+        rv_emit(t, kind == 1 ? rv_binv(r, v, b) : kind == 2 ? rv_bclr(r, v, b) : rv_bset(r, v, b));
+        if (size == 4)
+            rv_emit(t, rv_sext_w(r, r));    /* bit 31 may have changed */
+        rv_ea_write(t, &ea, size, r);
+        rv_free(t, r);
+    }
+    if (owned)
+        rv_free(t, v);
+    rv_ea_done(t, &ea);
+    rv_free(t, b);
+    return 1;
+}
+
 /* ADDQ SUBQ */
 static int op_quick(struct rv_tc *t, uint16_t op)
 {
@@ -617,6 +678,8 @@ static int line4(struct rv_tc *t, uint16_t op)
         return op_swap(t, op);
     if ((op & 0xffc0) == 0x4840)
         return op_pea(t, op);
+    if ((op & 0xff80) == 0x4c00)
+        return rv_emit_muldiv_l(t, op);
     if ((op & 0xfb80) == 0x4880)
         return op_movem(t, op);
     if ((op & 0xff00) == 0x4200 && (op & 0xc0) != 0xc0)
@@ -630,6 +693,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
 {
     switch (op >> 12) {
     case 0x0:
+        if ((op & 0x0100) || (op & 0xff00) == 0x0800)
+            return op_bit(t, op);
         return op_immediate(t, op);
     case 0x1: case 0x2: case 0x3:
         return op_move(t, op);
@@ -647,7 +712,7 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
         return op_moveq(t, op);
     case 0x8:
         if ((op & 0xc0) == 0xc0)
-            return 0;                           /* DIVU DIVS */
+            return rv_emit_div_w(t, op);
         return op_alu_dn(t, op, ALU_OR);
     case 0x9:
         if ((op & 0xc0) == 0xc0)
@@ -664,7 +729,7 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
         return op_alu_dn(t, op, ALU_CMP);
     case 0xc:
         if ((op & 0xc0) == 0xc0)
-            return 0;                           /* MULU MULS */
+            return rv_emit_mul_w(t, op);
         return op_alu_dn(t, op, ALU_AND);
     case 0xd:
         if ((op & 0xc0) == 0xc0)

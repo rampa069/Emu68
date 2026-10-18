@@ -104,5 +104,15 @@ void rv_cond(struct rv_tc *t, int cc, uint8_t rd);                          /* r
 /* Instruction emitters (ops.c, shift.c); return 0 if the opcode is not supported */
 int rv_emit_insn(struct rv_tc *t, uint16_t opcode);
 int rv_emit_lineE(struct rv_tc *t, uint16_t opcode);
+int rv_emit_mul_w(struct rv_tc *t, uint16_t opcode);
+int rv_emit_div_w(struct rv_tc *t, uint16_t opcode);
+int rv_emit_muldiv_l(struct rv_tc *t, uint16_t opcode);
+
+/*
+    Set by translated code to an exception vector number when an exception
+    should be taken; exceptions are not translated yet, so the dispatcher
+    stops the run and reports it.
+*/
+extern volatile uint32_t rv_jit_exception;
 
 #endif /* _EMU68_RISCV64_JIT_INTERNAL_H */

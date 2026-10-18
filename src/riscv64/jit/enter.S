@@ -7,11 +7,17 @@
 */
 
 /*
-    void rv_jit_enter(struct M68KState *ctx, void *code)
+    uint32_t rv_jit_enter(struct M68KState *ctx, void *code, int check)
 
     Load the m68k state into the pinned host registers
     (include/riscv64/register_map.h), call the translation unit and store the
     state back. Units return with ret; they keep ra, sp and tp.
+
+    With check != 0 the trampoline also verifies, after the unit, that every
+    m68k register is still sign-extended from bit 31, the invariant all
+    emitters rely on. It returns the mask of registers that are not (bit 0 =
+    D0 ... bit 15 = A7), and 0 otherwise. A violation is a translator bug
+    whose effect may only show many instructions later.
 */
 
 #include "riscv64/jit.h"
@@ -36,6 +42,7 @@ rv_jit_enter:
     sd      s11, 12*8(sp)
     sd      gp,  13*8(sp)
     sd      tp,  14*8(sp)
+    sd      a2,  15*8(sp)
 
     mv      tp, a0
     /* D0-D7 */
@@ -60,6 +67,92 @@ rv_jit_enter:
     lhu     t2,  RV_CTX_SR(tp)
 
     jalr    ra, 0(a1)
+
+    /* checked mode: mask of m68k registers that are not canonical */
+    ld      t0,  15*8(sp)
+    beqz    t0,  2f
+    li      t0,  0
+    addiw   t1, s0, 0
+    xor     t1, t1, s0
+    snez    t1, t1
+    or      t0, t0, t1
+    addiw   t1, s1, 0
+    xor     t1, t1, s1
+    snez    t1, t1
+    slli    t1, t1, 1
+    or      t0, t0, t1
+    addiw   t1, s2, 0
+    xor     t1, t1, s2
+    snez    t1, t1
+    slli    t1, t1, 2
+    or      t0, t0, t1
+    addiw   t1, s3, 0
+    xor     t1, t1, s3
+    snez    t1, t1
+    slli    t1, t1, 3
+    or      t0, t0, t1
+    addiw   t1, s4, 0
+    xor     t1, t1, s4
+    snez    t1, t1
+    slli    t1, t1, 4
+    or      t0, t0, t1
+    addiw   t1, s5, 0
+    xor     t1, t1, s5
+    snez    t1, t1
+    slli    t1, t1, 5
+    or      t0, t0, t1
+    addiw   t1, s6, 0
+    xor     t1, t1, s6
+    snez    t1, t1
+    slli    t1, t1, 6
+    or      t0, t0, t1
+    addiw   t1, s7, 0
+    xor     t1, t1, s7
+    snez    t1, t1
+    slli    t1, t1, 7
+    or      t0, t0, t1
+    addiw   t1, s8, 0
+    xor     t1, t1, s8
+    snez    t1, t1
+    slli    t1, t1, 8
+    or      t0, t0, t1
+    addiw   t1, s9, 0
+    xor     t1, t1, s9
+    snez    t1, t1
+    slli    t1, t1, 9
+    or      t0, t0, t1
+    addiw   t1, s10, 0
+    xor     t1, t1, s10
+    snez    t1, t1
+    slli    t1, t1, 10
+    or      t0, t0, t1
+    addiw   t1, s11, 0
+    xor     t1, t1, s11
+    snez    t1, t1
+    slli    t1, t1, 11
+    or      t0, t0, t1
+    addiw   t1, t3, 0
+    xor     t1, t1, t3
+    snez    t1, t1
+    slli    t1, t1, 12
+    or      t0, t0, t1
+    addiw   t1, t4, 0
+    xor     t1, t1, t4
+    snez    t1, t1
+    slli    t1, t1, 13
+    or      t0, t0, t1
+    addiw   t1, t5, 0
+    xor     t1, t1, t5
+    snez    t1, t1
+    slli    t1, t1, 14
+    or      t0, t0, t1
+    addiw   t1, t6, 0
+    xor     t1, t1, t6
+    snez    t1, t1
+    slli    t1, t1, 15
+    or      t0, t0, t1
+2:
+    sd      t0,  15*8(sp)        /* 0 when not checked: a2 was 0 */
 
     sw      s0,  RV_CTX_D0+0(tp)
     sw      s1,  RV_CTX_D0+4(tp)
@@ -95,5 +188,6 @@ rv_jit_enter:
     ld      s11, 12*8(sp)
     ld      gp,  13*8(sp)
     ld      tp,  14*8(sp)
+    ld      a0,  15*8(sp)
     addi    sp, sp, 16*8
     ret
