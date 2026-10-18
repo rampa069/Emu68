@@ -153,7 +153,19 @@ void rv_emit_exception(struct rv_tc *t, int vector, int format, uint32_t frame_p
 */
 extern volatile uint32_t rv_jit_exception;
 
-/* Set by translated STOP code; the dispatcher then calls rv_jit_stop_wait */
+/*
+    Set by translated STOP. The dispatcher clears it and calls
+    rv_jit_stop_wait, which returns 1 once an interrupt has been taken and
+    -1 when STOP can never end. The unit containing STOP must leave with a
+    plain exit (gp = next PC and ret), never through rv_emit_exit, since a
+    chained exit does not pass through the dispatcher.
+*/
 extern volatile uint32_t rv_jit_stopped;
+struct M68KState;
+int rv_jit_stop_wait(struct M68KState *ctx);
+
+/* Exit to a known address through a chainable exit stub (translator.c) */
+void rv_emit_exit(struct rv_tc *t, uint32_t target);
+extern uint32_t *rv_jit_exit_site;
 
 #endif /* _EMU68_RISCV64_JIT_INTERNAL_H */

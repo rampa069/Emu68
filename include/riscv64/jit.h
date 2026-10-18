@@ -29,6 +29,19 @@
 #define RV_CTX_A0   32
 #define RV_CTX_PC   76
 #define RV_CTX_SR   80
+#define RV_CTX_INT64 200        /* INTF / INT64, checked in translator.c */
+
+/* Dispatcher (src/riscv64/jit/loop.S) */
+#define RV_STUB_BASE    0x400   /* vector stubs: an exception without a handler */
+#define RV_STUB_END     0x600
+#define RV_FAST_BITS    12      /* direct-mapped table rv_jit_fast */
+#define RV_LOOP_PC0     0
+#define RV_LOOP_STUB    1
+#define RV_LOOP_INT     2
+#define RV_LOOP_MISS    3
+#define RV_LOOP_EXC     4
+#define RV_LOOP_STOP    5
+#define RV_LOOP_CHAIN   6
 
 #ifndef __ASSEMBLER__
 
@@ -39,6 +52,7 @@ struct rv_jit_config {
     int icnt;           /* maximum m68k instructions per unit, >= 1 */
     int trace;          /* print an "I" trace record before every unit */
     int flag_liveness;  /* compute only the flags a later instruction may read */
+    int chain;          /* chain units directly; with trace only on request */
 };
 
 /* Code buffer for translated code; must be writable and executable. */
@@ -56,7 +70,9 @@ struct rv_jit_stats {
     uint64_t units;             /* translation units created */
     uint64_t m68k_insns;        /* m68k instructions translated */
     uint64_t rv_insns;          /* RISC-V instructions emitted */
-    uint64_t executed;          /* units executed */
+    uint64_t executed;          /* units run from the C loop (trace) */
+    uint64_t dispatches;        /* returns of the assembly dispatcher to C */
+    uint64_t chains;            /* exit stubs chained */
 };
 extern struct rv_jit_stats rv_jit_stats;
 
@@ -82,6 +98,12 @@ void M68kReportInterrupt(int irq);
     the mask of m68k registers left not sign-extended by the unit.
 */
 uint32_t rv_jit_enter(struct M68KState *ctx, void *code, int check);
+
+/* Dispatcher without trace (src/riscv64/jit/loop.S); returns RV_LOOP_* */
+int rv_jit_loop(struct M68KState *ctx, int skip_int);
+
+/* Drop every translation unit, and with them every chain between units */
+void rv_jit_flush(void);
 
 #endif /* __ASSEMBLER__ */
 

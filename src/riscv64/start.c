@@ -312,11 +312,14 @@ void boot(uint64_t hartid, void *dtb)
     ctx->A[7].u32 = isp;
     ctx->SR = 0x2700;
 
-    struct rv_jit_config cfg = { .icnt = 256, .trace = 0, .flag_liveness = 1 };
+    struct rv_jit_config cfg = { .icnt = 256, .trace = 0, .flag_liveness = 1, .chain = 1 };
     if (args) {
         const char *cmdline = args->op_value;
         cfg.trace = find_token(cmdline, "trace") != NULL;
         cfg.flag_liveness = find_token(cmdline, "noliveness") == NULL;
+        /* chaining is on by default, and with trace only when asked for */
+        cfg.chain = find_token(cmdline, "nochain") == NULL &&
+                    (!cfg.trace || find_token(cmdline, "chain") != NULL);
         const char *icnt = find_token(cmdline, "ICNT=");
         if (icnt) {
             int v = 0;
@@ -345,14 +348,14 @@ void boot(uint64_t hartid, void *dtb)
 
     kprintf("[JIT] start pc=%08x isp=%08x icnt=%d%s%s\n", pc, isp, cfg.icnt, cfg.trace ? " trace" : "",
             cfg.flag_liveness ? "" : " noliveness");
-    uint64_t t0, t1;
+    uint64_t t0, t1, i0, i1;
     if (timer_us) {
         kprintf("[JIT] timer every %d us\n", (int)timer_us);
         rv_timer_start(timebase, timer_us);
     }
-    __asm__ volatile("rdtime %0" : "=r"(t0));
+    __asm__ volatile("rdtime %0\n\trdinstret %1" : "=r"(t0), "=r"(i0));
     int status = rv_jit_run(ctx);
-    __asm__ volatile("rdtime %0" : "=r"(t1));
+    __asm__ volatile("rdtime %0\n\trdinstret %1" : "=r"(t1), "=r"(i1));
     __asm__ volatile("csrc sie, %0" :: "r"(1ul << 5));     /* timer off for the report */
 
     if (status == 0)
@@ -372,6 +375,8 @@ void boot(uint64_t hartid, void *dtb)
     kprintf("[JIT] %ld units, %ld m68k instructions translated into %ld RV64 instructions, %ld units executed\n",
         (long)rv_jit_stats.units, (long)rv_jit_stats.m68k_insns, (long)rv_jit_stats.rv_insns,
         (long)rv_jit_stats.executed);
+    kprintf("[JIT] %ld returns from the dispatcher to C, %ld exits chained\n",
+        (long)rv_jit_stats.dispatches, (long)rv_jit_stats.chains);
     if (rv_jit_stats.m68k_insns)
         kprintf("[JIT] Mean RV64 instructions per m68k instruction: %ld.%02ld\n",
             (long)(rv_jit_stats.rv_insns / rv_jit_stats.m68k_insns),
@@ -385,6 +390,8 @@ void boot(uint64_t hartid, void *dtb)
                 kprintf(" level %d x %ld", l, (long)rv_irq_stats.taken[l]);
         kprintf("\n");
     }
+    /* instret: the exact count under QEMU only with -icount */
+    kprintf("[JIT] RV64 instructions retired during the run: %ld\n", (long)(i1 - i0));
 
     sbi_shutdown(status != 0);
 }

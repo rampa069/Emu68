@@ -22,6 +22,7 @@ _Static_assert(offsetof(struct M68KState, D) == RV_CTX_D0, "RV_CTX_D0");
 _Static_assert(offsetof(struct M68KState, A) == RV_CTX_A0, "RV_CTX_A0");
 _Static_assert(offsetof(struct M68KState, PC) == RV_CTX_PC, "RV_CTX_PC");
 _Static_assert(offsetof(struct M68KState, SR) == RV_CTX_SR, "RV_CTX_SR");
+_Static_assert(offsetof(struct M68KState, INT64) == RV_CTX_INT64, "RV_CTX_INT64");
 
 #define HASH_BITS   12
 #define HASH_SIZE   (1u << HASH_BITS)
@@ -36,9 +37,20 @@ struct rv_unit {
 
 struct rv_jit_stats rv_jit_stats;
 volatile uint32_t rv_jit_exception;
-volatile uint32_t rv_jit_stopped;
+volatile uint32_t rv_jit_stopped;       /* set by translated STOP */
+uint32_t *rv_jit_exit_site;             /* exit stub asking to be chained */
+
+/*
+    Direct-mapped table the assembly dispatcher looks units up in, indexed by
+    (pc >> 1) & (RV_FAST_SIZE - 1); filled by C on a miss.
+*/
+#define RV_FAST_SIZE (1u << RV_FAST_BITS)
+struct rv_fast { int32_t pc; uint32_t pad; uint32_t *code; };
+struct rv_fast rv_jit_fast[RV_FAST_SIZE];
+_Static_assert(sizeof(struct rv_fast) == 16, "rv_fast");
 
 static struct rv_unit *cache[HASH_SIZE];
+static int chain_enabled;
 static uint32_t *code_base, *code_ptr, *code_end;
 static struct rv_jit_config config = { .icnt = 256, .trace = 0, .flag_liveness = 1 };
 
@@ -57,7 +69,37 @@ void rv_jit_init(void *code, uintptr_t size, const struct rv_jit_config *cfg)
         config = *cfg;
     if (config.icnt < 1)
         config.icnt = 1;
+    chain_enabled = config.chain;
+    for (unsigned i = 0; i < RV_FAST_SIZE; i++)
+        rv_jit_fast[i] = (struct rv_fast){ 0 };
     rv_jit_stats = (struct rv_jit_stats){ 0 };
+}
+
+/*
+    Exit to a known m68k address. gp gets the target, then an exit stub:
+
+        ld    t0, INT64(tp)     interrupt pending: plain exit, so that the
+        bnez  t0, 1f            dispatcher takes it
+        auipc a7, 0             not chained yet: back to the dispatcher at
+        jalr  x0, 4(ra)         ra + 4 with a7 = this stub
+     1: ret
+
+    Chaining rewrites the auipc/jalr pair into auipc t0 / jalr x0 that jump
+    straight into the target unit, with the m68k state still in the pinned
+    registers and ra still the dispatcher's. A stub that must never be
+    chained (target 0, a vector stub) gets ret instead of its jalr. Without
+    chaining only li and ret are emitted.
+*/
+void rv_emit_exit(struct rv_tc *t, uint32_t target)
+{
+    rv_emit_li(t, RVR_PC, (int32_t)target);
+    if (!chain_enabled)
+        return;                         /* the unit ends with ret */
+    rv_emit(t, rv_ld(5, RVR_CTX, RV_CTX_INT64));
+    rv_emit(t, rv_bnez(5, 16));
+    rv_emit(t, rv_auipc(17, 0));
+    rv_emit(t, rv_jalr(0, 1, 4));
+    rv_emit(t, rv_ret());
 }
 
 /*
@@ -135,7 +177,7 @@ static struct rv_unit *translate(uint32_t pc)
     }
 
     if (!t.ended)
-        rv_emit_li(&t, RVR_PC, (int32_t)t.cursor);
+        rv_emit_exit(&t, t.cursor);
     rv_emit(&t, rv_ret());
     if (t.overflow) {
         kprintf("[JIT] unit at %08x overflowed the code buffer\n", pc);
@@ -171,6 +213,66 @@ static struct rv_unit *lookup(uint32_t pc)
     return NULL;
 }
 
+static void fast_fill(struct rv_unit *u)
+{
+    struct rv_fast *f = &rv_jit_fast[(u->pc >> 1) & (RV_FAST_SIZE - 1)];
+    f->pc = (int32_t)u->pc;
+    f->code = u->code;
+}
+
+/* The unit for pc, translated if needed, or NULL (a message was printed) */
+static struct rv_unit *get_unit(uint32_t pc)
+{
+    struct rv_unit *u = lookup(pc);
+    if (u == NULL)
+        u = translate(pc);
+    return u;
+}
+
+/*
+    Drop every unit. Chains only live inside the code buffer, so starting it
+    again from its base also drops every chain; the fast table and the hash
+    table are cleared so that no stale code address survives.
+*/
+void rv_jit_flush(void)
+{
+    for (unsigned i = 0; i < HASH_SIZE; i++) {
+        for (struct rv_unit *u = cache[i], *n; u; u = n) {
+            n = u->next;
+            tlsf_free(tlsf, u);
+        }
+        cache[i] = NULL;
+    }
+    for (unsigned i = 0; i < RV_FAST_SIZE; i++)
+        rv_jit_fast[i] = (struct rv_fast){ 0 };
+    code_ptr = code_base;
+    __asm__ volatile("fence rw, rw\n\tfence.i" ::: "memory");
+}
+
+/*
+    Chain the exit stub at site (its auipc) to the unit for pc. Returns 0, or
+    -1 if pc cannot be translated.
+*/
+static int chain(uint32_t *site, uint32_t pc)
+{
+    if (pc == 0 || (pc >= RV_STUB_BASE && pc < RV_STUB_END)) {
+        site[1] = rv_ret();             /* never chained: plain exit */
+    } else {
+        struct rv_unit *u = get_unit(pc);
+        if (u == NULL)
+            return -1;
+        fast_fill(u);
+        int64_t off = (int64_t)(intptr_t)u->code - (int64_t)(intptr_t)site;
+        int32_t hi = (int32_t)((off + 0x800) >> 12);
+        int32_t lo = (int32_t)(off - ((int64_t)hi << 12));
+        site[0] = rv_auipc(5, (uint32_t)hi);
+        site[1] = rv_jalr(0, 5, lo);
+        rv_jit_stats.chains++;
+    }
+    __asm__ volatile("fence rw, rw\n\tfence.i" ::: "memory");
+    return 0;
+}
+
 /* One line of docs/trace-format.md (testbed repository) */
 static void trace_record(const struct M68KState *ctx)
 {
@@ -189,48 +291,114 @@ static void trace_record(const struct M68KState *ctx)
 #define STUB_BASE   0x400
 #define STUB_END    0x600
 
-int rv_jit_run(struct M68KState *ctx)
+static int unhandled(uint32_t pc)
+{
+    int vector = (int)(pc - STUB_BASE) / 2;
+    if (config.trace)
+        kprintf("H exception %d\n", vector);
+    kprintf("[JIT] exception %d taken with no handler installed\n", vector);
+    return 2;
+}
+
+static int unsupported_exception(struct M68KState *ctx)
+{
+    kprintf("[JIT] exception vector %d at %08x: exceptions are not supported by the RV64 translator yet\n",
+        (int)rv_jit_exception, ctx->PC);
+    rv_jit_exception = 0;
+    return -1;
+}
+
+/* After STOP: 0 to go on at ctx->PC, -1 if STOP can never end */
+static int stopped(struct M68KState *ctx)
+{
+    rv_jit_stopped = 0;
+    return rv_jit_stop_wait(ctx) < 0 ? -1 : 0;
+}
+
+/*
+    With trace: the C loop, one unit at a time through rv_jit_enter, so that
+    every unit gets its trace record and the canonical register check. Units
+    are only chained when the "chain" boot option asks for it; records are
+    then printed only where control comes back here.
+*/
+static int run_traced(struct M68KState *ctx)
 {
     for (;;) {
         if (ctx->PC == 0) {
-            if (config.trace)
-                kprintf("H pc0\n");
+            kprintf("H pc0\n");
             return 0;
         }
-        if (ctx->PC >= STUB_BASE && ctx->PC < STUB_END) {
-            int vector = (int)(ctx->PC - STUB_BASE) / 2;
-            if (config.trace)
-                kprintf("H exception %d\n", vector);
-            kprintf("[JIT] exception %d taken with no handler installed\n", vector);
-            return 2;
-        }
+        if (ctx->PC >= STUB_BASE && ctx->PC < STUB_END)
+            return unhandled(ctx->PC);
         /* interrupts are taken between units, where SR is exact */
-        if (ctx->INT64 && rv_jit_interrupt(ctx) && config.trace)
+        if (ctx->INT64 && rv_jit_interrupt(ctx))
             kprintf("# interrupt\n");
-        if (config.trace)
-            trace_record(ctx);
+        trace_record(ctx);
 
-        struct rv_unit *u = lookup(ctx->PC);
-        if (u == NULL && (u = translate(ctx->PC)) == NULL)
+        struct rv_unit *u = get_unit(ctx->PC);
+        if (u == NULL)
             return -1;
-        uint32_t bad = rv_jit_enter(ctx, u->code, config.trace);
+        uint32_t bad = rv_jit_enter(ctx, u->code, 1);
         rv_jit_stats.executed++;
-        if (rv_jit_stopped) {
-            rv_jit_stopped = 0;
-            if (rv_jit_stop_wait(ctx) < 0)
-                return -1;
-            if (config.trace)
-                kprintf("# stop, then interrupt\n");
-        }
-        if (rv_jit_exception) {
-            kprintf("[JIT] exception vector %d at %08x: exceptions are not supported by the RV64 translator yet\n",
-                (int)rv_jit_exception, ctx->PC);
-            rv_jit_exception = 0;
-            return -1;
-        }
+        if (rv_jit_exception)
+            return unsupported_exception(ctx);
         if (bad) {
             /* the translated code broke the canonical register invariant */
             kprintf("[JIT] non-canonical register mask %04x after the unit at %08x\n", bad, u->pc);
+            return -1;
+        }
+        if (rv_jit_stopped && stopped(ctx) < 0)
+            return -1;
+        if (rv_jit_exit_site && chain(rv_jit_exit_site, ctx->PC) < 0)
+            return -1;
+    }
+}
+
+int rv_jit_run(struct M68KState *ctx)
+{
+    if (config.trace)
+        return run_traced(ctx);
+
+    int skip_int = 0;
+    for (;;) {
+        int why = rv_jit_loop(ctx, skip_int);
+        /* a miss returns before any unit ran: keep the skip for the next entry */
+        if (why != RV_LOOP_MISS)
+            skip_int = 0;
+        rv_jit_stats.dispatches++;
+        switch (why) {
+        case RV_LOOP_PC0:
+            return 0;
+        case RV_LOOP_STUB:
+            return unhandled(ctx->PC);
+        case RV_LOOP_INT:
+            /*
+                Run at least one unit before looking again: when the request
+                is masked, so as not to spin, and when it was taken, so that
+                the handler gets to run before a level 7 that is still held
+                (it ignores the mask) is taken again, as MainLoop does.
+            */
+            rv_jit_interrupt(ctx);
+            skip_int = 1;
+            break;
+        case RV_LOOP_MISS: {
+            struct rv_unit *u = get_unit(ctx->PC);
+            if (u == NULL)
+                return -1;
+            fast_fill(u);
+            break;
+        }
+        case RV_LOOP_EXC:
+            return unsupported_exception(ctx);
+        case RV_LOOP_STOP:
+            if (stopped(ctx) < 0)
+                return -1;
+            break;
+        case RV_LOOP_CHAIN:
+            if (chain(rv_jit_exit_site, ctx->PC) < 0)
+                return -1;
+            break;
+        default:
             return -1;
         }
     }

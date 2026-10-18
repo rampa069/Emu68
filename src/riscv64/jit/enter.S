@@ -11,7 +11,13 @@
 
     Load the m68k state into the pinned host registers
     (include/riscv64/register_map.h), call the translation unit and store the
-    state back. Units return with ret; they keep ra, sp and tp.
+    state back. Units return with ret; they keep ra, sp and tp. Used for
+    runs with trace, one unit (or one chain of units) at a time; runs
+    without trace use the dispatcher in loop.S.
+
+    An exit stub that is not chained yet returns to ra + 4 with a7 pointing
+    at itself (translator.c, rv_emit_exit); the address is left in
+    rv_jit_exit_site, 0 after a plain exit.
 
     With check != 0 the trampoline also verifies, after the unit, that every
     m68k register is still sign-extended from bit 31, the invariant all
@@ -66,7 +72,14 @@ rv_jit_enter:
     lw      gp,  RV_CTX_PC(tp)
     lhu     t2,  RV_CTX_SR(tp)
 
+    /* ra + 4 must be the instruction after li: no compressed forms here */
+    .option push
+    .option norvc
     jalr    ra, 0(a1)
+    li      a7,  0               /* ra + 0: plain exit; ra + 4: exit stub */
+    .option pop
+    lla     t1,  rv_jit_exit_site
+    sd      a7,  0(t1)
 
     /* checked mode: mask of m68k registers that are not canonical */
     ld      t0,  15*8(sp)

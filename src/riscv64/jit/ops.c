@@ -36,26 +36,21 @@ static const int size_bits[4] = { 1, 2, 4, 0 };   /* size field 00 01 10 11 */
 
 /* ------------------------------------------------------------ helpers */
 
-/* PC-relative target, held canonical in gp */
-static void set_pc(struct rv_tc *t, uint32_t target)
-{
-    rv_emit_li(t, RVR_PC, (int32_t)target);
-}
-
-/* gp = cond ? target : fall; cond in a register */
-static void select_pc(struct rv_tc *t, uint8_t cond, uint32_t target, uint32_t fall)
+/*
+    Leave the unit for target or fall, cond in a register. Each way gets its
+    own exit (rv_emit_exit), so both can be chained; an exit that is not
+    chained ends in the ret the translator adds after the last instruction.
+*/
+static void exit_select(struct rv_tc *t, uint8_t cond, uint32_t target, uint32_t fall)
 {
     uint32_t *b = t->ptr;
     rv_emit(t, rv_beqz(cond, 0));
-    set_pc(t, target);
-    uint32_t *j = t->ptr;
-    rv_emit(t, rv_jal(0, 0));
+    rv_emit_exit(t, target);
+    rv_emit(t, rv_ret());               /* exit without chaining */
     uint32_t *l_fall = t->ptr;
-    set_pc(t, fall);
-    if (!t->overflow) {
+    rv_emit_exit(t, fall);
+    if (!t->overflow)
         *b = rv_patch_b(*b, (int32_t)((l_fall - b) * 4));
-        *j = rv_patch_j(*j, (int32_t)((t->ptr - j) * 4));
-    }
 }
 
 static void push_long(struct rv_tc *t, uint8_t val)
@@ -560,17 +555,17 @@ static int op_bcc(struct rv_tc *t, uint16_t op)
     uint32_t next = t->cursor;
 
     if (cc == 0) {                      /* BRA */
-        set_pc(t, target);
+        rv_emit_exit(t, target);
     } else if (cc == 1) {               /* BSR */
         uint8_t r = rv_tmp(t);
         rv_emit_li(t, r, (int32_t)next);
         push_long(t, r);
         rv_free(t, r);
-        set_pc(t, target);
+        rv_emit_exit(t, target);
     } else {
         uint8_t c = rv_tmp(t);
         rv_cond(t, cc, c);
-        select_pc(t, c, target, next);
+        exit_select(t, c, target, next);    /* the exits only use t0 and a7 */
         rv_free(t, c);
     }
     t->ended = 1;
@@ -619,15 +614,13 @@ static int op_dbcc(struct rv_tc *t, uint16_t op)
     rv_emit(t, rv_slli(w, w, 48));          /* zero exactly when the counter is -1 */
     uint32_t *b_expired = t->ptr;
     rv_emit(t, rv_beqz(w, 0));
-    set_pc(t, target);
-    uint32_t *j_end = t->ptr;
-    rv_emit(t, rv_jal(0, 0));
+    rv_emit_exit(t, target);
+    rv_emit(t, rv_ret());               /* exit without chaining */
     uint32_t *l_fall = t->ptr;
-    set_pc(t, next);
+    rv_emit_exit(t, next);
     if (!t->overflow) {
         *b_true = rv_patch_b(*b_true, (int32_t)((l_fall - b_true) * 4));
         *b_expired = rv_patch_b(*b_expired, (int32_t)((l_fall - b_expired) * 4));
-        *j_end = rv_patch_j(*j_end, (int32_t)((t->ptr - j_end) * 4));
     }
     rv_free(t, c);
     rv_free(t, w);
