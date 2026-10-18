@@ -43,6 +43,8 @@ struct rv_tc {
     uint32_t temps;         /* free temporaries, bit per host register */
     int ended;              /* the instruction ended the unit and set gp */
     int overflow;           /* the code buffer ran out */
+    uint8_t live;           /* XNZVC flags that may still be read after this
+                               instruction; it may skip writing the others */
 };
 
 /* Emission */
@@ -100,6 +102,14 @@ void rv_flags_nz(struct rv_tc *t, int size, uint8_t result);                /* N
 void rv_flags_add(struct rv_tc *t, int size, uint8_t d, uint8_t s, uint8_t r_out, int set_x);
 void rv_flags_sub(struct rv_tc *t, int size, uint8_t d, uint8_t s, uint8_t r_out, int set_x);
 void rv_cond(struct rv_tc *t, int cc, uint8_t rd);                          /* rd = condition true */
+
+/*
+    Flag liveness (flags.c). rv_sr_usage gives needs << 8 | sets for an
+    opcode; rv_flags_liveness fills live[i] for the instructions of a unit.
+    Emitters may skip any flag not in t->live, or compute it anyway.
+*/
+uint32_t rv_sr_usage(uint16_t opcode);
+void rv_flags_liveness(const uint16_t *opcodes, uint32_t count, uint8_t *live);
 
 /* Instruction emitters (ops.c, shift.c); return 0 if the opcode is not supported */
 int rv_emit_insn(struct rv_tc *t, uint16_t opcode);

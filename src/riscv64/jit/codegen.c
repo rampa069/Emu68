@@ -448,8 +448,29 @@ static void pack_nzvc(struct rv_tc *t, uint8_t n, uint8_t z, uint8_t v, uint8_t 
     rv_emit(t, rv_sh3add(v, n, v));
 }
 
+/* acc |= flag << bit, acc_set tells whether acc already holds something */
+static void put_flag(struct rv_tc *t, uint8_t acc, int *acc_set, uint8_t flag, int bit)
+{
+    if (!*acc_set) {
+        rv_emit(t, bit ? rv_slli(acc, flag, (uint8_t)bit) : rv_mv(acc, flag));
+        *acc_set = 1;
+    } else if (bit) {
+        rv_emit(t, rv_slli(flag, flag, (uint8_t)bit));
+        rv_emit(t, rv_or(acc, acc, flag));
+    } else {
+        rv_emit(t, rv_or(acc, acc, flag));
+    }
+}
+
 void rv_flags_nz(struct rv_tc *t, int size, uint8_t result)
 {
+    if (!(t->live & (CCR_N | CCR_Z | CCR_V | CCR_C)))
+        return;
+    if (!(t->live & (CCR_N | CCR_Z))) {
+        rv_emit(t, rv_andi(RVR_SR, RVR_SR, ~(CCR_V | CCR_C)));
+        return;
+    }
+
     uint8_t n = rv_tmp(t), z = rv_tmp(t);
     uint8_t src = result;
 
@@ -466,9 +487,92 @@ void rv_flags_nz(struct rv_tc *t, int size, uint8_t result)
     rv_free(t, z);
 }
 
+/* Only some flags live: compute those (t->live is a strict subset) */
+static void flags_addsub_partial(struct rv_tc *t, int size, uint8_t d, uint8_t s, uint8_t r_out,
+                                 int set_x, int is_sub, uint8_t live)
+{
+    uint8_t sh = (uint8_t)(64 - 8 * size);
+    uint8_t ds = d, ss = s, r = rv_tmp(t), f = rv_tmp(t), acc = rv_tmp(t);
+    int acc_set = 0;
+    int need_c = live & (CCR_C | (set_x ? CCR_X : 0));
+
+    if (size != 4) {
+        ds = rv_tmp(t);
+        ss = rv_tmp(t);
+        rv_emit(t, rv_slli(ds, d, sh));
+        rv_emit(t, rv_slli(ss, s, sh));
+        rv_emit(t, is_sub ? rv_sub(r, ds, ss) : rv_add(r, ds, ss));
+    } else {
+        rv_emit(t, is_sub ? rv_subw(r, d, s) : rv_addw(r, d, s));
+    }
+    /* r: canonical 32-bit result, or the result at the top of the register */
+
+    if (need_c) {
+        rv_emit(t, is_sub ? rv_sltu(f, ds, ss) : rv_sltu(f, r, ds));
+        if (live & CCR_C)
+            put_flag(t, acc, &acc_set, f, 0);
+        if (set_x && (live & CCR_X))
+            put_flag(t, acc, &acc_set, f, 4);   /* bit 0 above left f intact */
+    }
+    if (live & CCR_V) {
+        if (size == 4) {
+            rv_emit(t, is_sub ? rv_sub(f, d, s) : rv_add(f, d, s));
+            rv_emit(t, rv_xor(f, f, r));
+            rv_emit(t, rv_snez(f, f));
+        } else {
+            uint8_t k = rv_tmp(t);
+            if (is_sub) {
+                rv_emit(t, rv_xor(f, ds, ss));      /* V = ((d^s) & (d^r)) < 0 */
+                rv_emit(t, rv_xor(k, ds, r));
+            } else {
+                rv_emit(t, rv_xor(f, ds, r));       /* V = ((d^r) & (s^r)) < 0 */
+                rv_emit(t, rv_xor(k, ss, r));
+            }
+            rv_emit(t, rv_and(f, f, k));
+            rv_emit(t, rv_sltz(f, f));
+            rv_free(t, k);
+        }
+        put_flag(t, acc, &acc_set, f, 1);
+    }
+    if (live & CCR_Z) {
+        rv_emit(t, rv_seqz(f, r));
+        put_flag(t, acc, &acc_set, f, 2);
+    }
+    if (live & CCR_N) {
+        rv_emit(t, rv_sltz(f, r));
+        put_flag(t, acc, &acc_set, f, 3);
+    }
+
+    if (size != 4)
+        rv_emit(t, rv_srli(r_out, r, sh));      /* result, zero-extended */
+    else if (r_out != r)
+        rv_emit(t, rv_mv(r_out, r));
+
+    if (acc_set) {
+        /* clear the flags this instruction writes; the dead ones end up 0 */
+        rv_emit(t, rv_andi(RVR_SR, RVR_SR, set_x ? -32 : -16));
+        rv_emit(t, rv_or(RVR_SR, RVR_SR, acc));
+    }
+    if (size != 4) {
+        rv_free(t, ds);
+        rv_free(t, ss);
+    }
+    rv_free(t, r);
+    rv_free(t, f);
+    rv_free(t, acc);
+}
+
 static void flags_addsub(struct rv_tc *t, int size, uint8_t d, uint8_t s, uint8_t r_out,
                          int set_x, int is_sub)
 {
+    uint8_t all = CCR_N | CCR_Z | CCR_V | CCR_C | (set_x ? CCR_X : 0);
+    uint8_t live = t->live & all;
+
+    if (live != all) {
+        flags_addsub_partial(t, size, d, s, r_out, set_x, is_sub, live);
+        return;
+    }
+
     uint8_t r = rv_tmp(t), v = rv_tmp(t), c = rv_tmp(t), n = rv_tmp(t);
 
     if (size == 4) {

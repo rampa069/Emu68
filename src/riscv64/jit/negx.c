@@ -38,27 +38,37 @@ static void addsub_x(struct rv_tc *t, int size, uint8_t d, uint8_t s, int is_sub
 {
     uint8_t sh = (uint8_t)(64 - 8 * size);
     uint8_t ds = rv_tmp(t), ss = rv_tmp(t), r = rv_tmp(t), c = rv_tmp(t), k = rv_tmp(t);
+    int fl = (t->live & 0x1f) != 0;                 /* no live flag: result only */
 
     rv_emit(t, rv_slli(ds, d, sh));
     rv_emit(t, rv_slli(ss, s, sh));
     if (is_sub) {
         rv_emit(t, rv_sub(r, ds, ss));
-        rv_emit(t, rv_sltu(c, ds, ss));             /* borrow of d - s */
+        if (fl)
+            rv_emit(t, rv_sltu(c, ds, ss));         /* borrow of d - s */
     } else {
         rv_emit(t, rv_add(r, ds, ss));
-        rv_emit(t, rv_sltu(c, r, ds));              /* carry of d + s */
+        if (fl)
+            rv_emit(t, rv_sltu(c, r, ds));          /* carry of d + s */
     }
     if (use_x) {
         rv_emit(t, rv_bexti(k, RVR_SR, 4));
         rv_emit(t, rv_slli(k, k, sh));              /* X at the operand's bit 0 */
         if (is_sub) {
-            rv_emit(t, rv_sltu(r_out, r, k));       /* borrow of (d - s) - x */
+            if (fl)
+                rv_emit(t, rv_sltu(r_out, r, k));   /* borrow of (d - s) - x */
             rv_emit(t, rv_sub(r, r, k));
         } else {
             rv_emit(t, rv_add(r, r, k));
-            rv_emit(t, rv_sltu(r_out, r, k));       /* carry of (d + s) + x */
+            if (fl)
+                rv_emit(t, rv_sltu(r_out, r, k));   /* carry of (d + s) + x */
         }
-        rv_emit(t, rv_or(c, c, r_out));
+        if (fl)
+            rv_emit(t, rv_or(c, c, r_out));
+    }
+    if (!fl) {
+        rv_emit(t, rv_srli(r_out, r, sh));          /* result, zero-extended */
+        goto done;
     }
 
     /* V */
@@ -89,6 +99,7 @@ static void addsub_x(struct rv_tc *t, int size, uint8_t d, uint8_t s, int is_sub
     rv_emit(t, rv_andi(RVR_SR, RVR_SR, -32));
     rv_emit(t, rv_or(RVR_SR, RVR_SR, k));
 
+done:
     rv_free(t, ds);
     rv_free(t, ss);
     rv_free(t, r);

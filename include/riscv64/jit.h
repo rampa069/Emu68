@@ -38,6 +38,7 @@
 struct rv_jit_config {
     int icnt;           /* maximum m68k instructions per unit, >= 1 */
     int trace;          /* print an "I" trace record before every unit */
+    int flag_liveness;  /* compute only the flags a later instruction may read */
 };
 
 /* Code buffer for translated code; must be writable and executable. */
