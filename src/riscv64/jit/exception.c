@@ -263,6 +263,19 @@ int rv_emit_trap(struct rv_tc *t, uint16_t op)
     } else if ((op & 0xf000) == 0xa000) {   /* Line-A */
         rv_emit_exception(t, 10, 0, t->pc, t->pc);
     } else if ((op & 0xf000) == 0xf000) {   /* Line-F: FPU and other coprocessors */
+        /*
+            cpSAVE (FSAVE) and cpRESTORE (FRESTORE) are privileged: with a
+            valid mode a user-mode one takes the privilege violation first,
+            as in TG68K.C (cpSAVE: (An), -(An), d16(An), d8(An,Xn), abs;
+            cpRESTORE: (An), (An)+, d16(An), d8(An,Xn), abs, PC-relative).
+        */
+        int type = (op >> 6) & 7, mode = (op >> 3) & 7, reg = op & 7;
+        int valid = (type == 4 && (mode == 2 || mode == 4 || mode == 5 || mode == 6 ||
+                                    (mode == 7 && reg <= 1))) ||
+                    (type == 5 && (mode == 2 || mode == 3 || mode == 5 || mode == 6 ||
+                                    (mode == 7 && reg <= 3)));
+        if (valid)
+            rv_emit_priv_check(t);
         rv_emit_exception(t, 11, 0, t->pc, t->pc);
     } else {
         return 0;
