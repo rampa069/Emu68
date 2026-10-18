@@ -98,6 +98,8 @@ static uint32_t sr_usage(uint16_t op)
             return USE(0, 0);                               /* LINK UNLK */
         if (op == 0x4e71 || op == 0x4e75)
             return USE(0, 0);                               /* NOP RTS */
+        if ((op & 0xffc0) == 0x4800 && mode != 1)
+            return USE(X | Z, ALL);                         /* NBCD: Z only cleared */
         if (size == 3)
             return DEFAULT;                                 /* SR/CCR moves, TAS, ... */
         switch (op & 0xff00) {
@@ -124,8 +126,10 @@ static uint32_t sr_usage(uint16_t op)
     case 0x8: case 0xc:
         if (size == 3)                                      /* DIVx.W: zero divide; MULx.W */
             return (op >> 12) == 0x8 ? DEFAULT : USE(0, NZVC);
+        if ((op & 0x01f0) == 0x0100)
+            return USE(X | Z, ALL);                         /* SBCD ABCD: Z only cleared */
         if ((op & 0x0130) == 0x0100)
-            return DEFAULT;                                 /* SBCD PACK UNPK ABCD EXG */
+            return DEFAULT;                                 /* PACK UNPK EXG */
         return USE(0, NZVC);                                /* OR AND */
     case 0x9: case 0xd:
         if (size == 3)

@@ -21,10 +21,14 @@
     changes and ends the unit (rv_emit_write_sr in exception.c). CCR writes
     only touch the low five bits.
 
-    MOVEC knows SFC, DFC, CACR, USP, VBR, MSP and ISP. CACR keeps the 68040
-    bits Emu68 keeps (0x80008000), not the 68020 ones. Any other control
-    register, CAAR included (68020/68030 only, not on the 68040 that Emu68
-    presents), takes the illegal instruction exception.
+    MOVEC knows SFC, DFC, CACR, USP, VBR, MSP and ISP, and the 68040 MMU
+    registers TC, ITT0, ITT1, DTT0, DTT1, MMUSR, URP and SRP, stored with the
+    masks Emu68 uses on AArch64 (src/M68k_LINE4.c, EMIT_MOVEC): CACR keeps
+    0x80008000, TC only P (0x4000, so the MMU can never be enabled), the
+    transparent translation registers 0xffffe364, URP and SRP drop bits 8-0,
+    MMUSR is stored as written. Nothing acts on the MMU registers yet. Any
+    other control register, CAAR included (68020/68030 only, not on the
+    68040 that Emu68 presents), takes the illegal instruction exception.
 */
 
 #include <stddef.h>
@@ -41,7 +45,20 @@
 #define CTX_SFC     ((int)offsetof(struct M68KState, SFC))
 #define CTX_DFC     ((int)offsetof(struct M68KState, DFC))
 _Static_assert(offsetof(struct M68KState, CACR) == CTX_CACR, "CACR");
-_Static_assert(offsetof(struct M68KState, SFC) < 2048, "SFC");
+_Static_assert(offsetof(struct M68KState, DTT1) < 2048, "context offsets fit in 12 bits");
+
+/* 68040 MMU registers: offset, write mask, size of the field */
+struct mmu_reg { uint16_t code; uint16_t off; uint32_t mask; uint8_t size; };
+static const struct mmu_reg mmu_regs[] = {
+    { 0x003, offsetof(struct M68KState, TCR),   0x00004000, 2 },
+    { 0x004, offsetof(struct M68KState, ITT0),  0xffffe364, 4 },
+    { 0x005, offsetof(struct M68KState, ITT1),  0xffffe364, 4 },
+    { 0x006, offsetof(struct M68KState, DTT0),  0xffffe364, 4 },
+    { 0x007, offsetof(struct M68KState, DTT1),  0xffffe364, 4 },
+    { 0x805, offsetof(struct M68KState, MMUSR), 0xffffffff, 4 },
+    { 0x806, offsetof(struct M68KState, URP),   0xfffffe00, 4 },
+    { 0x807, offsetof(struct M68KState, SRP),   0xfffffe00, 4 },
+};
 
 #define EA_MODE(op)     (((op) >> 3) & 7)
 #define EA_REG(op)      ((op) & 7)
@@ -153,6 +170,21 @@ static int movec(struct rv_tc *t, uint16_t op)
         break;
     }
     default:
+        for (unsigned i = 0; i < sizeof(mmu_regs) / sizeof(mmu_regs[0]); i++) {
+            const struct mmu_reg *m = &mmu_regs[i];
+            if (m->code != (ext & 0xfff))
+                continue;
+            if (to_cr) {
+                k = rv_tmp(t);
+                rv_emit_li(t, k, (int32_t)m->mask);
+                rv_emit(t, rv_and(k, k, r));
+                rv_emit(t, m->size == 2 ? rv_sh(k, RVR_CTX, m->off) : rv_sw(k, RVR_CTX, m->off));
+                rv_free(t, k);
+            } else {
+                rv_emit(t, m->size == 2 ? rv_lhu(r, RVR_CTX, m->off) : rv_lw(r, RVR_CTX, m->off));
+            }
+            return 1;
+        }
         rv_emit_exception(t, 4, 0, t->pc, t->pc);
         t->ended = 1;
         break;

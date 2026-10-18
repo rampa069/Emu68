@@ -287,3 +287,57 @@ int rv_emit_trapcc(struct rv_tc *t, uint16_t op)
     rv_free(t, c);
     return 1;
 }
+
+/*
+    CHK <ea>,Dn: 0100 ddd1 10 <ea> word, 0100 ddd1 00 <ea> long (68020).
+    Traps (vector 6, format $2) when Dn < 0 or Dn > bound, signed. The
+    flags follow TG68K.C, which sets them whether or not it traps: N = Dn < 0
+    (what the PRM defines), Z = Dn == 0, V = C = 0 (undefined in the PRM).
+*/
+int rv_emit_chk(struct rv_tc *t, uint16_t op)
+{
+    int size = (op & 0x0080) ? 2 : 4;
+    int mode = (op >> 3) & 7, reg = op & 7;
+    struct rv_ea ea;
+    int owned;
+
+    if (mode == 1 || (mode == 7 && reg > 4))
+        return 0;
+    if (!rv_ea_decode(t, mode, reg, size, &ea))
+        return 0;
+    uint8_t b = rv_ea_read(t, &ea, size, &owned);
+    uint8_t dn = rv_dreg((op >> 9) & 7);
+    uint8_t x = rv_tmp(t), y = rv_tmp(t), k = rv_tmp(t);
+    int sh = size == 2 ? 48 : 32;
+
+    /* top-aligned, so a signed 64-bit compare is the signed compare at size */
+    rv_emit(t, rv_slli(x, dn, sh));
+    rv_emit(t, rv_slli(y, b, sh));
+    if (owned)
+        rv_free(t, b);
+    rv_ea_done(t, &ea);
+
+    /* N Z V C */
+    rv_emit(t, rv_andi(RVR_SR, RVR_SR, -16));
+    rv_emit(t, rv_sltz(k, x));
+    rv_emit(t, rv_slli(k, k, 3));
+    rv_emit(t, rv_or(RVR_SR, RVR_SR, k));
+    rv_emit(t, rv_seqz(k, x));
+    rv_emit(t, rv_slli(k, k, 2));
+    rv_emit(t, rv_or(RVR_SR, RVR_SR, k));
+
+    /* trap if x < 0 or x > y */
+    rv_emit(t, rv_slt(k, y, x));
+    rv_emit(t, rv_srli(y, x, 63));
+    rv_emit(t, rv_or(k, k, y));
+    rv_free(t, x);
+    rv_free(t, y);
+    uint32_t *br = t->ptr;
+    rv_emit(t, rv_beqz(k, 0));
+    rv_free(t, k);
+    rv_emit_exception(t, 6, 2, t->cursor, t->pc);
+    rv_emit(t, rv_ret());
+    if (!t->overflow)
+        *br = rv_patch_b(*br, (int32_t)((t->ptr - br) * 4));
+    return 1;
+}

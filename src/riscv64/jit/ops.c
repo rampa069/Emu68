@@ -696,6 +696,10 @@ static int line4(struct rv_tc *t, uint16_t op)
         return op_ext(t, op);
     if ((op & 0xf1c0) == 0x41c0)
         return op_lea(t, op);
+    if ((op & 0xf140) == 0x4100)
+        return rv_emit_chk(t, op);              /* CHK.L, CHK.W (exception.c) */
+    if ((op & 0xffc0) == 0x4800)
+        return rv_emit_nbcd(t, op);             /* NBCD (bcd.c) */
     if ((op & 0xf9c0) == 0x40c0 || (op & 0xfffe) == 0x4e7a)
         return rv_emit_sr_op(t, op);            /* SR, CCR, MOVEC (sr.c) */
     if ((op & 0xfff8) == 0x4840)
@@ -720,6 +724,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
 {
     switch (op >> 12) {
     case 0x0:
+        if ((op & 0xf9c0) == 0x08c0 && (op & 0x0600))
+            return rv_emit_cas(t, op);          /* CAS, CAS2 (cas.c) */
         if ((op & 0x0100) || (op & 0xff00) == 0x0800)
             return op_bit(t, op);
         return op_immediate(t, op);
@@ -740,6 +746,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
     case 0x8:
         if ((op & 0xc0) == 0xc0)
             return rv_emit_div_w(t, op);
+        if ((op & 0x01f0) == 0x0100)
+            return rv_emit_abcd_sbcd(t, op);    /* SBCD (bcd.c) */
         return op_alu_dn(t, op, ALU_OR);
     case 0x9:
         if ((op & 0xc0) == 0xc0)
@@ -759,6 +767,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
     case 0xc:
         if ((op & 0xc0) == 0xc0)
             return rv_emit_mul_w(t, op);
+        if ((op & 0x01f0) == 0x0100)
+            return rv_emit_abcd_sbcd(t, op);    /* ABCD (bcd.c) */
         return op_alu_dn(t, op, ALU_AND);
     case 0xd:
         if ((op & 0xc0) == 0xc0)
