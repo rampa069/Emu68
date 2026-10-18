@@ -10,6 +10,13 @@
 #include <stdarg.h>
 #include "support.h"
 
+/*
+    Floating point printing needs a hardware FPU on RV64 builds for cores
+    without F and D (soft-float ABI): libgcc's soft-float routines are built
+    for the medlow code model and cannot be linked into the kernel's upper
+    half. Those builds print %f as the raw IEEE bits.
+*/
+#ifndef __riscv_float_abi_soft
 #define LOG2_10 3.321928094887362
 
 static double pow10_tab[] = {
@@ -68,6 +75,7 @@ int my_log10(double v)
 
     return mid;
 }
+#endif /* !__riscv_float_abi_soft */
 
 static int int_strlen(char *buf)
 {
@@ -148,6 +156,7 @@ static void int_itoa(char *buf, char base, uintptr_t value, char zero_pad, int p
     buf[length] = 0;
 }
 
+#ifndef __riscv_float_abi_soft
 static void int_ftoa(char *buf, double value)
 {
     int exp = 0;
@@ -217,6 +226,7 @@ static void int_ftoa(char *buf, double value)
     }
     int_itoa(buf, 10, exp, 0, 0, 0, 0, 0, 0, 0);
 }
+#endif /* !__riscv_float_abi_soft */
 
 void vkprintf_pc(putc_func putc_f, void *putc_data, const char * restrict format, va_list args)
 {
@@ -329,7 +339,18 @@ void vkprintf_pc(putc_func putc_f, void *putc_data, const char * restrict format
                     break;
 
                 case 'f':
+#ifndef __riscv_float_abi_soft
                     int_ftoa(tmpbuf, va_arg(args, double));
+#else
+                    {
+                        /* a double is passed in an integer register here */
+                        uint64_t bits = va_arg(args, uint64_t);
+                        tmpbuf[0] = '#';
+                        for (int i = 0; i < 16; i++)
+                            tmpbuf[1 + i] = "0123456789abcdef"[(bits >> (60 - 4 * i)) & 15];
+                        tmpbuf[17] = 0;
+                    }
+#endif
                     str = tmpbuf;
                     size_mod -= int_strlen(str);
                     while (*str) {

@@ -12,6 +12,8 @@ set(CMAKE_C_EXTENSIONS ON)
 configure_file(include/version.h.in include/version.h @ONLY)
 
 set(RV64_MARCH "rv64gc_zba_zbb_zbs_zifencei" CACHE STRING "Target ISA for the RV64 build")
+# lp64 for cores without F and D (the testbed SoC: RV64_MARCH=rv64imac_zicsr_zifencei_zba_zbb_zbs)
+set(RV64_MABI "lp64d" CACHE STRING "Target ABI for the RV64 build")
 
 set(RV64_FILES
     src/riscv64/entry.S
@@ -63,7 +65,7 @@ target_include_directories(Emu68.elf PRIVATE
 # gp holds the m68k PC and tp the context pointer (include/riscv64/register_map.h),
 # so the compiler must never use them and the linker must not relax to gp.
 target_compile_options(Emu68.elf PRIVATE
-    -march=${RV64_MARCH} -mabi=lp64d -mcmodel=medany -mno-relax
+    -march=${RV64_MARCH} -mabi=${RV64_MABI} -mcmodel=medany -mno-relax
     -ffixed-x3 -ffixed-x4
     -ffreestanding -fno-builtin -fno-jump-tables -fno-pic -fno-pie
     -fno-stack-protector -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables
@@ -72,7 +74,7 @@ target_compile_options(Emu68.elf PRIVATE
 
 set(LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/scripts/ldscript-rv64.lds)
 target_link_options(Emu68.elf PRIVATE
-    -march=${RV64_MARCH} -mabi=lp64d -nostdlib -nostartfiles -static
+    -march=${RV64_MARCH} -mabi=${RV64_MABI} -nostdlib -nostartfiles -static
     -Wl,--no-relax -Wl,--build-id=none -Wl,-Map,${CMAKE_BINARY_DIR}/Emu68.map
     -T ${LINKER_SCRIPT}
 )
