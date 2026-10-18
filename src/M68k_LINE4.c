@@ -1238,7 +1238,8 @@ static uint32_t EMIT_EXT(struct TranslatorContext *ctx, uint16_t opcode)
         then combine both to extb.l 
     */
 
-    if ((mode == 2) && (opcode ^ cache_read_16(ICACHE, (uintptr_t)ctx->tc_M68kCodePtr)) == 0x40) {
+    extern int DisableFusion;
+    if (!DisableFusion && (mode == 2) && (opcode ^ cache_read_16(ICACHE, (uintptr_t)ctx->tc_M68kCodePtr)) == 0x40) {
         ctx->tc_M68kCodePtr++;
         mode = 7;
         insn_consumed++;

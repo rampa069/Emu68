@@ -6725,9 +6725,11 @@ uint32_t EMIT_lineE(struct TranslatorContext *ctx)
 {
     uint16_t opcode = cache_read_16(ICACHE, (uintptr_t)ctx->tc_M68kCodePtr++);
 
+    extern int DisableFusion;
+
     /* Special case: the combination of RO(R/L).W #8, Dn; SWAP Dn; RO(R/L).W, Dn
         this is replaced by REV instruction */
-    if (((opcode & 0xfef8) == 0xe058) &&
+    if (!DisableFusion && ((opcode & 0xfef8) == 0xe058) &&
         cache_read_16(ICACHE, (uintptr_t)&ctx->tc_M68kCodePtr[0]) == (0x4840 | (opcode & 7)) &&
         (cache_read_16(ICACHE, (uintptr_t)&ctx->tc_M68kCodePtr[1]) & 0xfeff) == (opcode & 0xfeff))
     {

@@ -580,6 +580,8 @@ void parse_cmdline(const char *cmdline)
     extern int DisableFPU;
 
     DisableFPU = !!find_token(cmdline, "nofpu");
+    extern int DisableFusion;
+    DisableFusion = !!find_token(cmdline, "nofuse");
     debug = !!find_token(cmdline, "debug");
     disasm = !!find_token(cmdline, "disassemble");
 

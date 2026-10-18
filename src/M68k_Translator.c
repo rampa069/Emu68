@@ -33,6 +33,14 @@ options_t Options = {
 
 int disasm = 0;
 int debug = 0;
+
+/*
+    When set (boot argument "nofuse"), no emitter merges several m68k
+    instructions into one: every instruction is translated on its own, so that
+    with ICNT=1 each translation unit holds exactly one m68k instruction. Used
+    for per-instruction comparison against a reference CPU.
+*/
+int DisableFusion = 0;
 const int debug_cnt = 0;
 
 static inline int globalDebug() {

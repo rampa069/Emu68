@@ -154,7 +154,9 @@ uint32_t EMIT_move(struct TranslatorContext *ctx)
         - move.l -(An), Reg
         - move.l (An)+, Reg
     */
-    if ((opcode & 0xf000) == 0x2000)
+    extern int DisableFusion;
+
+    if ((opcode & 0xf000) == 0x2000 && !DisableFusion)
     {
         // Fetch 2nd opcode just now
         uint16_t opcode2 = cache_read_16(ICACHE, (uintptr_t)&ctx->tc_M68kCodePtr[1]);
@@ -356,7 +358,7 @@ uint32_t EMIT_move(struct TranslatorContext *ctx)
             size = 2;
 
         /* Only if target is data register */
-        if ((tmp & 0x38) == 0)
+        if ((tmp & 0x38) == 0 && !DisableFusion)
         {
             uint16_t opcode2 = cache_read_16(ICACHE, (uintptr_t)&ctx->tc_M68kCodePtr[move_length - 1]);
             
