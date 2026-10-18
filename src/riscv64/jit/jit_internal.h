@@ -109,6 +109,13 @@ int rv_emit_div_w(struct rv_tc *t, uint16_t opcode);
 int rv_emit_muldiv_l(struct rv_tc *t, uint16_t opcode);
 int rv_emit_neg_not(struct rv_tc *t, uint16_t opcode);
 int rv_emit_addx_subx(struct rv_tc *t, uint16_t opcode);
+int rv_emit_trap(struct rv_tc *t, uint16_t opcode);
+int rv_emit_trapv(struct rv_tc *t);
+int rv_emit_trapcc(struct rv_tc *t, uint16_t opcode);
+int rv_emit_rte(struct rv_tc *t);
+int rv_emit_move_usp(struct rv_tc *t, uint16_t opcode);
+/* Take an exception with a format 0 or 2 frame; sets gp, caller ends the unit */
+void rv_emit_exception(struct rv_tc *t, int vector, int format, uint32_t frame_pc, uint32_t insn);
 
 /*
     Set by translated code to an exception vector number when an exception

@@ -143,6 +143,13 @@ static void trace_record(const struct M68KState *ctx)
     kprintf("\n");
 }
 
+/*
+    Vectors without a handler point at 0x400 + 2 * vector (set up by the boot
+    code, as the TG68K testbench does). Reaching one ends the run.
+*/
+#define STUB_BASE   0x400
+#define STUB_END    0x600
+
 int rv_jit_run(struct M68KState *ctx)
 {
     for (;;) {
@@ -150,6 +157,13 @@ int rv_jit_run(struct M68KState *ctx)
             if (config.trace)
                 kprintf("H pc0\n");
             return 0;
+        }
+        if (ctx->PC >= STUB_BASE && ctx->PC < STUB_END) {
+            int vector = (int)(ctx->PC - STUB_BASE) / 2;
+            if (config.trace)
+                kprintf("H exception %d\n", vector);
+            kprintf("[JIT] exception %d taken with no handler installed\n", vector);
+            return 2;
         }
         if (config.trace)
             trace_record(ctx);

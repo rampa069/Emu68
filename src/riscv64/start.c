@@ -285,6 +285,20 @@ void boot(uint64_t hartid, void *dtb)
         sbi_shutdown(0);
     }
 
+    /*
+        Vector table at 68k address 0 (VBR = 0): every vector the program
+        does not set points at 0x400 + 2 * vector, which the dispatcher
+        reports as an unhandled exception (the TG68K testbench does the same).
+    */
+    for (int v = 2; v < 256; v++) {
+        volatile uint8_t *e = (volatile uint8_t *)(uintptr_t)(4 * v);
+        uint32_t stub = 0x400 + 2 * v;
+        e[0] = (uint8_t)(stub >> 24);
+        e[1] = (uint8_t)(stub >> 16);
+        e[2] = (uint8_t)(stub >> 8);
+        e[3] = (uint8_t)stub;
+    }
+
     /* m68k start state, as M68K_StartEmu sets it up without PiStorm */
     uint32_t isp = (((uint32_t)(uintptr_t)hunks - 4096) & 0xfffff000) - 4;
     *(volatile uint32_t *)(intptr_t)(int32_t)isp = 0;      /* return address 0 */
@@ -323,6 +337,8 @@ void boot(uint64_t hartid, void *dtb)
         kprintf("[JIT] Back from translated code.\n");
     else
         kprintf("[JIT] Stopped at %08x.\n", ctx->PC);
+    if (status == 2)
+        status = 0;     /* an unhandled exception is a normal end of the program */
     kprintf("[JIT] M68K Context:\n");
     for (int i = 0; i < 8; i += 4)
         kprintf("[JIT]     D%d = 0x%08x    D%d = 0x%08x    D%d = 0x%08x    D%d = 0x%08x\n",

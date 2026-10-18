@@ -18,6 +18,7 @@
       BTST BCHG BCLR BSET
       MULU MULS DIVU DIVS, word and long forms (muldiv.c)
       NEG NEGX NOT ADDX SUBX (negx.c)
+      TRAP TRAPV TRAPcc ILLEGAL RTE MOVE USP, Line-A, Line-F, zero divide (exception.c)
 
     Every other opcode returns 0, and the translator stops with a message.
     Condition codes are always computed in full; using Emu68's look-ahead
@@ -589,8 +590,10 @@ static int op_scc(struct rv_tc *t, uint16_t op)
     struct rv_ea ea;
     int mode = EA_MODE(op);
 
-    if (mode == 1 || (mode == 7 && EA_REG(op) > 1))
-        return 0;                           /* DBcc is mode 1; TRAPcc is 7.2-7.4 */
+    if (mode == 7 && EA_REG(op) >= 2)
+        return rv_emit_trapcc(t, op);       /* TRAPcc */
+    if (mode == 1)
+        return 0;                           /* DBcc, decoded before */
     if (!rv_ea_decode(t, mode, EA_REG(op), 1, &ea))
         return 0;
     uint8_t c = rv_tmp(t);
@@ -679,6 +682,14 @@ static int line4(struct rv_tc *t, uint16_t op)
         return 1;
     if (op == 0x4e75)
         return op_rts(t);
+    if (op == 0x4e73)
+        return rv_emit_rte(t);
+    if ((op & 0xfff0) == 0x4e60)
+        return rv_emit_move_usp(t, op);
+    if (op == 0x4e76)
+        return rv_emit_trapv(t);
+    if (op == 0x4afc || (op & 0xfff0) == 0x4e40)
+        return rv_emit_trap(t, op);             /* ILLEGAL, TRAP #n */
     if ((op & 0xfff8) == 0x4e50)
         return op_link(t, op);
     if ((op & 0xfff8) == 0x4e58)
@@ -764,6 +775,14 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
         return op_alu_dn(t, op, ALU_ADD);
     case 0xe:
         return rv_emit_lineE(t, op);
+    case 0xa:
+        return rv_emit_trap(t, op);             /* Line-A */
+    case 0xf:
+        /* Line-F: the FPU (coprocessor 1) is not built, so its opcodes
+           trap; MOVE16, CINV, CPUSH, PFLUSH, PTEST are not translated yet */
+        if (((op >> 9) & 7) == 1)
+            return rv_emit_trap(t, op);
+        return 0;
     default:
         return 0;
     }

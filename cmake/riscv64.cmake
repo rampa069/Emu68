@@ -31,6 +31,7 @@ set(RV64_FILES
     src/riscv64/jit/shift.c
     src/riscv64/jit/muldiv.c
     src/riscv64/jit/negx.c
+    src/riscv64/jit/exception.c
     src/riscv-virt/start_virt.c
     src/riscv-virt/support_virt.c
     src/support.c

@@ -26,9 +26,12 @@
     The 32-bit DIVS.L overflow of -2^31 / -1 sets V, as the PRM requires.
     Emu68 on AArch64 does not detect it (sdiv does not trap).
 
-    A zero divisor raises the zero divide exception (vector 5). Exceptions
-    are not translated yet, so the unit stops the run at the instruction
-    with rv_jit_exception set.
+    A zero divisor raises the zero divide exception (vector 5) with a format
+    $2 frame: PC of the next instruction and the address of the division.
+    N, Z and V are undefined then (C = 0); they are set to N = 0, Z = 1,
+    V = 0 with X kept, which is what TG68K.C does in every form and for any
+    previous CCR (measured over 106 cases). Emu68 on AArch64 leaves the CCR
+    unchanged.
 */
 
 #include <stdint.h>
@@ -37,19 +40,18 @@
 
 #define VECTOR_ZERO_DIVIDE 5
 
-/* if (reg == 0) stop the run at this instruction with vector 5 */
+/* if (divisor == 0) take the zero divide exception and leave the unit */
 static void zero_divide_check(struct rv_tc *t, uint8_t divisor)
 {
     uint32_t *b = t->ptr;
     rv_emit(t, rv_bnez(divisor, 0));
-    uint8_t a = rv_tmp(t), v = rv_tmp(t);
-    rv_emit_li(t, a, (int64_t)(intptr_t)&rv_jit_exception);
-    rv_emit(t, rv_addi(v, 0, VECTOR_ZERO_DIVIDE));
-    rv_emit(t, rv_sw(v, a, 0));
-    rv_emit_li(t, RVR_PC, (int32_t)t->pc);
+    uint8_t z = rv_tmp(t);
+    rv_emit(t, rv_andi(RVR_SR, RVR_SR, -16));   /* CCR = X | Z */
+    rv_emit(t, rv_addi(z, 0, 4));
+    rv_emit(t, rv_or(RVR_SR, RVR_SR, z));
+    rv_free(t, z);
+    rv_emit_exception(t, VECTOR_ZERO_DIVIDE, 2, t->cursor, t->pc);
     rv_emit(t, rv_ret());
-    rv_free(t, a);
-    rv_free(t, v);
     if (!t->overflow)
         *b = rv_patch_b(*b, (int32_t)((t->ptr - b) * 4));
 }
