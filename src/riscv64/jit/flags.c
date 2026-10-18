@@ -60,7 +60,7 @@ static uint32_t sr_usage(uint16_t op)
     switch (op >> 12) {
     case 0x0:
         if (op & 0x0100)
-            return mode == 1 ? DEFAULT : USE(0, Z);         /* MOVEP; BTST.. Dn,<ea> */
+            return mode == 1 ? USE(0, 0) : USE(0, Z);       /* MOVEP; BTST.. Dn,<ea> */
         switch (op & 0x0f00) {
         case 0x0800:                                        /* BTST.. #n,<ea> */
             return USE(0, Z);
@@ -98,6 +98,8 @@ static uint32_t sr_usage(uint16_t op)
             return USE(0, 0);                               /* LINK UNLK */
         if (op == 0x4e71 || op == 0x4e75)
             return USE(0, 0);                               /* NOP RTS */
+        if ((op & 0xffc0) == 0x4ac0 && op != 0x4afc)
+            return USE(0, NZVC);                            /* TAS (not ILLEGAL) */
         if ((op & 0xffc0) == 0x4800 && mode != 1)
             return USE(X | Z, ALL);                         /* NBCD: Z only cleared */
         if (size == 3)
@@ -129,7 +131,7 @@ static uint32_t sr_usage(uint16_t op)
         if ((op & 0x01f0) == 0x0100)
             return USE(X | Z, ALL);                         /* SBCD ABCD: Z only cleared */
         if ((op & 0x0130) == 0x0100)
-            return DEFAULT;                                 /* PACK UNPK EXG */
+            return USE(0, 0);                               /* PACK UNPK EXG */
         return USE(0, NZVC);                                /* OR AND */
     case 0x9: case 0xd:
         if (size == 3)

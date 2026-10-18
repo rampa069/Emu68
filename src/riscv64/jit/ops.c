@@ -716,6 +716,8 @@ static int line4(struct rv_tc *t, uint16_t op)
     if (((op & 0xff00) == 0x4000 || (op & 0xff00) == 0x4400 || (op & 0xff00) == 0x4600) &&
         (op & 0xc0) != 0xc0)
         return rv_emit_neg_not(t, op);
+    if ((op & 0xffc0) == 0x4ac0)
+        return rv_emit_tas(t, op);              /* TAS (misc.c); ILLEGAL is taken above */
     if ((op & 0xff00) == 0x4a00 && (op & 0xc0) != 0xc0)
         return op_tst(t, op);
     return 0;
@@ -727,6 +729,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
     case 0x0:
         if ((op & 0xf9c0) == 0x08c0 && (op & 0x0600))
             return rv_emit_cas(t, op);          /* CAS, CAS2 (cas.c) */
+        if ((op & 0x0138) == 0x0108)
+            return rv_emit_movep(t, op);        /* MOVEP (misc.c) */
         if ((op & 0x0100) || (op & 0xff00) == 0x0800)
             return op_bit(t, op);
         return op_immediate(t, op);
@@ -749,6 +753,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
             return rv_emit_div_w(t, op);
         if ((op & 0x01f0) == 0x0100)
             return rv_emit_abcd_sbcd(t, op);    /* SBCD (bcd.c) */
+        if ((op & 0x01f0) == 0x0140 || (op & 0x01f0) == 0x0180)
+            return rv_emit_pack_unpk(t, op);    /* PACK, UNPK (misc.c) */
         return op_alu_dn(t, op, ALU_OR);
     case 0x9:
         if ((op & 0xc0) == 0xc0)
@@ -761,7 +767,7 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
             return op_alu_an(t, op, ALU_CMP);
         if (op & 0x0100) {
             if (EA_MODE(op) == 1)
-                return 0;                       /* CMPM */
+                return rv_emit_cmpm(t, op);     /* CMPM (misc.c) */
             return op_alu_dn(t, op, ALU_EOR);   /* EOR Dn,<ea> */
         }
         return op_alu_dn(t, op, ALU_CMP);
@@ -770,6 +776,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
             return rv_emit_mul_w(t, op);
         if ((op & 0x01f0) == 0x0100)
             return rv_emit_abcd_sbcd(t, op);    /* ABCD (bcd.c) */
+        if ((op & 0x0130) == 0x0100)
+            return rv_emit_exg(t, op);          /* EXG (misc.c) */
         return op_alu_dn(t, op, ALU_AND);
     case 0xd:
         if ((op & 0xc0) == 0xc0)
