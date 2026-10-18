@@ -311,10 +311,11 @@ void boot(uint64_t hartid, void *dtb)
     ctx->A[7].u32 = isp;
     ctx->SR = 0x2700;
 
-    struct rv_jit_config cfg = { .icnt = 256, .trace = 0 };
+    struct rv_jit_config cfg = { .icnt = 256, .trace = 0, .flag_liveness = 1 };
     if (args) {
         const char *cmdline = args->op_value;
         cfg.trace = find_token(cmdline, "trace") != NULL;
+        cfg.flag_liveness = find_token(cmdline, "noliveness") == NULL;
         const char *icnt = find_token(cmdline, "ICNT=");
         if (icnt) {
             int v = 0;
@@ -327,7 +328,8 @@ void boot(uint64_t hartid, void *dtb)
     void *jit_code = tlsf_malloc_aligned(tlsf, JIT_CODE_SIZE, 4096);
     rv_jit_init(jit_code, JIT_CODE_SIZE, &cfg);
 
-    kprintf("[JIT] start pc=%08x isp=%08x icnt=%d%s\n", pc, isp, cfg.icnt, cfg.trace ? " trace" : "");
+    kprintf("[JIT] start pc=%08x isp=%08x icnt=%d%s%s\n", pc, isp, cfg.icnt, cfg.trace ? " trace" : "",
+            cfg.flag_liveness ? "" : " noliveness");
     uint64_t t0, t1;
     __asm__ volatile("rdtime %0" : "=r"(t0));
     int status = rv_jit_run(ctx);

@@ -167,6 +167,8 @@ static int op_clr(struct rv_tc *t, uint16_t op)
         return 0;
     rv_ea_write(t, &ea, size, 0);
     rv_ea_done(t, &ea);
+    if (!(t->live & (CCR_N | CCR_Z | CCR_V | CCR_C)))
+        return 1;
     uint8_t z = rv_tmp(t);
     rv_emit(t, rv_addi(z, 0, CCR_Z));
     rv_emit(t, rv_andi(RVR_SR, RVR_SR, -16));
@@ -486,13 +488,15 @@ static int op_bit(struct rv_tc *t, uint16_t op)
     uint8_t v = rv_ea_read(t, &ea, size, &owned);
 
     /* Z = !bit */
-    uint8_t z = rv_tmp(t);
-    rv_emit(t, rv_bext(z, v, b));
-    rv_emit(t, rv_seqz(z, z));
-    rv_emit(t, rv_slli(z, z, 2));
-    rv_emit(t, rv_andi(RVR_SR, RVR_SR, ~CCR_Z));
-    rv_emit(t, rv_or(RVR_SR, RVR_SR, z));
-    rv_free(t, z);
+    if (t->live & CCR_Z) {
+        uint8_t z = rv_tmp(t);
+        rv_emit(t, rv_bext(z, v, b));
+        rv_emit(t, rv_seqz(z, z));
+        rv_emit(t, rv_slli(z, z, 2));
+        rv_emit(t, rv_andi(RVR_SR, RVR_SR, ~CCR_Z));
+        rv_emit(t, rv_or(RVR_SR, RVR_SR, z));
+        rv_free(t, z);
+    }
 
     if (kind != 0) {
         uint8_t r = rv_tmp(t);

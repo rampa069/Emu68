@@ -33,6 +33,7 @@ set(RV64_FILES
     src/riscv64/jit/negx.c
     src/riscv64/jit/exception.c
     src/riscv64/jit/sr.c
+    src/riscv64/jit/flags.c
     src/riscv-virt/start_virt.c
     src/riscv-virt/support_virt.c
     src/support.c

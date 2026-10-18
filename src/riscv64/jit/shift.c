@@ -59,17 +59,21 @@ static void mask_low(struct rv_tc *t, uint8_t rd, uint8_t rs, int bits)
 static uint8_t emit_shift(struct rv_tc *t, enum shift_kind kind, int left, int n, uint8_t v, uint8_t c)
 {
     uint8_t res = rv_tmp(t), cf = rv_tmp(t), vf = rv_tmp(t), a = rv_tmp(t);
+    /* no live flag among those written: result only */
+    int fl = (t->live & (kind == SH_RO ? 0x0f : 0x1f)) != 0;
 
-    rv_emit(t, rv_addi(vf, 0, 0));                  /* V = 0 unless ASL */
+    if (fl)
+        rv_emit(t, rv_addi(vf, 0, 0));              /* V = 0 unless ASL */
 
     switch (kind) {
     case SH_AS:
     case SH_LS:
         if (left) {
             rv_emit(t, rv_sll(a, v, c));
-            rv_emit(t, rv_bexti(cf, a, (uint8_t)n));
+            if (fl)
+                rv_emit(t, rv_bexti(cf, a, (uint8_t)n));
             mask_low(t, res, a, n);
-            if (kind == SH_AS) {
+            if (kind == SH_AS && fl) {
                 /* V: top c+1 bits of v (aligned at bit 63) not all equal */
                 uint8_t k = rv_tmp(t);
                 rv_emit(t, rv_slli(a, v, (uint8_t)(64 - n)));
@@ -87,9 +91,11 @@ static uint8_t emit_shift(struct rv_tc *t, enum shift_kind kind, int left, int n
                 s = rv_tmp(t);
                 rv_emit(t, n == 32 ? rv_sext_w(s, v) : n == 16 ? rv_sext_h(s, v) : rv_sext_b(s, v));
             }
-            rv_emit(t, rv_slli(a, s, 1));
-            rv_emit(t, kind == SH_AS ? rv_sra(a, a, c) : rv_srl(a, a, c));
-            rv_emit(t, rv_andi(cf, a, 1));
+            if (fl) {
+                rv_emit(t, rv_slli(a, s, 1));
+                rv_emit(t, kind == SH_AS ? rv_sra(a, a, c) : rv_srl(a, a, c));
+                rv_emit(t, rv_andi(cf, a, 1));
+            }
             rv_emit(t, kind == SH_AS ? rv_sra(a, s, c) : rv_srl(a, s, c));
             mask_low(t, res, a, n);
             if (s != v)
@@ -106,9 +112,11 @@ static uint8_t emit_shift(struct rv_tc *t, enum shift_kind kind, int left, int n
         rv_emit(t, left ? rv_srl(k, v, k) : rv_sll(k, v, k));
         rv_emit(t, rv_or(a, a, k));
         mask_low(t, res, a, n);
-        rv_emit(t, rv_bexti(cf, res, (uint8_t)(left ? 0 : n - 1)));
-        rv_emit(t, rv_snez(k, c));                  /* C = 0 for a zero count */
-        rv_emit(t, rv_and(cf, cf, k));
+        if (fl) {
+            rv_emit(t, rv_bexti(cf, res, (uint8_t)(left ? 0 : n - 1)));
+            rv_emit(t, rv_snez(k, c));              /* C = 0 for a zero count */
+            rv_emit(t, rv_and(cf, cf, k));
+        }
         rv_free(t, r);
         rv_free(t, k);
         break;
@@ -126,7 +134,8 @@ static uint8_t emit_shift(struct rv_tc *t, enum shift_kind kind, int left, int n
         rv_emit(t, left ? rv_srl(k, w, k) : rv_sll(k, w, k));
         rv_emit(t, rv_or(a, a, k));
         mask_low(t, a, a, n + 1);
-        rv_emit(t, rv_bexti(cf, a, (uint8_t)n));    /* also X */
+        if (fl)
+            rv_emit(t, rv_bexti(cf, a, (uint8_t)n));    /* also X */
         mask_low(t, res, a, n);
         rv_free(t, w);
         rv_free(t, r);
@@ -135,10 +144,13 @@ static uint8_t emit_shift(struct rv_tc *t, enum shift_kind kind, int left, int n
     }
     }
 
+    uint8_t z = rv_tmp(t);
+    if (!fl)
+        goto done;
+
     /* SR: N Z V C, and X */
     uint8_t nz = a;
     rv_emit(t, rv_bexti(nz, res, (uint8_t)(n - 1)));       /* N */
-    uint8_t z = rv_tmp(t);
     rv_emit(t, rv_seqz(z, res));
     rv_emit(t, rv_sh1add(vf, vf, cf));                      /* V<<1 | C */
     rv_emit(t, rv_sh2add(vf, z, vf));
@@ -165,6 +177,7 @@ static uint8_t emit_shift(struct rv_tc *t, enum shift_kind kind, int left, int n
     }
     rv_emit(t, rv_or(RVR_SR, RVR_SR, vf));
 
+done:
     rv_free(t, cf);
     rv_free(t, vf);
     rv_free(t, a);
