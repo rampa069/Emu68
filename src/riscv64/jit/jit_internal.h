@@ -101,7 +101,8 @@ void rv_flags_add(struct rv_tc *t, int size, uint8_t d, uint8_t s, uint8_t r_out
 void rv_flags_sub(struct rv_tc *t, int size, uint8_t d, uint8_t s, uint8_t r_out, int set_x);
 void rv_cond(struct rv_tc *t, int cc, uint8_t rd);                          /* rd = condition true */
 
-/* Instruction emitters (ops.c); return 0 if the opcode is not supported */
+/* Instruction emitters (ops.c, shift.c); return 0 if the opcode is not supported */
 int rv_emit_insn(struct rv_tc *t, uint16_t opcode);
+int rv_emit_lineE(struct rv_tc *t, uint16_t opcode);
 
 #endif /* _EMU68_RISCV64_JIT_INTERNAL_H */

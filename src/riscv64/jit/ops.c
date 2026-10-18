@@ -14,6 +14,7 @@
       ADD ADDA ADDQ SUB SUBA SUBQ CMP CMPA AND OR EOR
       MOVE from SR, MOVEM, LINK, UNLK
       Bcc BRA BSR DBcc JMP JSR RTS
+      ASL ASR LSL LSR ROL ROR ROXL ROXR (shift.c)
 
     Every other opcode returns 0, and the translator stops with a message.
     Condition codes are always computed in full; using Emu68's look-ahead
@@ -669,6 +670,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
         if ((op & 0xc0) == 0xc0)
             return op_alu_an(t, op, ALU_ADD);
         return op_alu_dn(t, op, ALU_ADD);
+    case 0xe:
+        return rv_emit_lineE(t, op);
     default:
         return 0;
     }
