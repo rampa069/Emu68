@@ -11,7 +11,8 @@
 
     Load and store page faults in the m68k window are offered to the MMIO
     emulation first (src/riscv64/mmio.c). Everything else is reported and
-    the hart stops; timer and external interrupts are still to come.
+    the machine is shut down through SBI with a failure status; timer and
+    external interrupts are still to come.
 */
 
 #include <stdint.h>
@@ -63,6 +64,12 @@ void trap_handler(struct trap_frame *f)
         kprintf("[TRAP]   x%02d %016lx  x%02d %016lx  x%02d %016lx  x%02d %016lx\n",
             i, f->x[i], i + 1, f->x[i + 1], i + 2, f->x[i + 2], i + 3, f->x[i + 3]);
 
+    /* Stop the machine rather than hang, so test runs fail fast */
+    register long a0 __asm__("a0") = 0;             /* SRST shutdown */
+    register long a1 __asm__("a1") = 1;             /* system failure */
+    register long a6 __asm__("a6") = 0;
+    register long a7 __asm__("a7") = 0x53525354;
+    __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : "r"(a6), "r"(a7) : "memory");
     while (1)
         cpu_halt();
 }

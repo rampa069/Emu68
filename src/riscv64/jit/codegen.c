@@ -158,6 +158,78 @@ static uint8_t brief_index(struct rv_tc *t, uint16_t ext)
     return i;
 }
 
+/*
+    68020 full extension word (bit 8 set): base An or PC (or suppressed),
+    base displacement, index (or suppressed), optional memory indirection,
+    pre- or post-indexed, and an outer displacement. The address is computed
+    into a temporary and kept as a canonical 32-bit value, since the 68k adds
+    addresses modulo 2^32 and the sum may otherwise leave the mirrored window.
+    base_reg is the host register of An, or 0 with pc_base for PC-relative.
+    Returns the temporary, or 0 for a reserved encoding.
+*/
+static uint8_t full_extension(struct rv_tc *t, uint16_t ext, uint8_t base_reg, uint32_t pc_base)
+{
+    int bs = (ext >> 7) & 1, is = (ext >> 6) & 1;
+    int bd_size = (ext >> 4) & 3, iis = ext & 7;
+
+    if (bd_size == 0 || (ext & 0x08) || (is && iis > 3) || (!is && iis == 4))
+        return 0;
+
+    int32_t bd = 0;
+    if (bd_size == 2)
+        bd = (int16_t)rv_fetch16(t);
+    else if (bd_size == 3)
+        bd = (int32_t)rv_fetch32(t);
+
+    int od_size = iis & 3;          /* 0 no indirection (iis 0), 1 null, 2 word, 3 long */
+    int32_t od = 0;
+    if (iis != 0) {
+        if (od_size == 2)
+            od = (int16_t)rv_fetch16(t);
+        else if (od_size == 3)
+            od = (int32_t)rv_fetch32(t);
+    }
+    int indirect = iis != 0;
+    int post = indirect && !is && (iis & 4);
+
+    /* a = base + bd */
+    uint8_t a = rv_tmp(t);
+    if (bs) {
+        rv_emit_li(t, a, bd);
+    } else if (base_reg) {
+        if (rv_imm12_ok(bd)) {
+            rv_emit(t, rv_addiw(a, base_reg, bd));
+        } else {
+            rv_emit_li(t, a, bd);
+            rv_emit(t, rv_addw(a, base_reg, a));
+        }
+    } else {
+        rv_emit_li(t, a, (int32_t)(pc_base + (uint32_t)bd));
+    }
+
+    uint8_t i = 0;
+    if (!is)
+        i = brief_index(t, ext);
+
+    if (i && !post) {               /* index before any indirection */
+        rv_emit(t, rv_addw(a, a, i));
+    }
+    if (indirect) {
+        rv_load68(t, 4, a, a, 0);   /* fetch the pointer */
+        if (i && post)
+            rv_emit(t, rv_addw(a, a, i));
+        if (od) {
+            uint8_t k = rv_tmp(t);
+            rv_emit_li(t, k, od);
+            rv_emit(t, rv_addw(a, a, k));
+            rv_free(t, k);
+        }
+    }
+    if (i)
+        rv_free(t, i);
+    return a;
+}
+
 int rv_ea_decode(struct rv_tc *t, int mode, int reg, int size, struct rv_ea *ea)
 {
     ea->base_is_tmp = 0;
@@ -200,10 +272,17 @@ int rv_ea_decode(struct rv_tc *t, int mode, int reg, int size, struct rv_ea *ea)
         return 1;
     case 6: {
         uint16_t ext = rv_fetch16(t);
-        if (ext & 0x0100)
-            return 0;               /* 68020 full extension format: not yet */
+        if (ext & 0x0100) {
+            uint8_t a = full_extension(t, ext, rv_areg(reg), 0);
+            if (!a)
+                return 0;
+            ea->kind = EA_MEM;
+            ea->base = a;
+            ea->base_is_tmp = 1;
+            return 1;
+        }
         uint8_t i = brief_index(t, ext);
-        rv_emit(t, rv_add(i, rv_areg(reg), i));
+        rv_emit(t, rv_addw(i, rv_areg(reg), i));   /* 32-bit wrap, canonical */
         ea->kind = EA_MEM;
         ea->base = i;
         ea->base_is_tmp = 1;
@@ -238,12 +317,19 @@ int rv_ea_decode(struct rv_tc *t, int mode, int reg, int size, struct rv_ea *ea)
     case 3: {                       /* d8(PC,Xn) */
         uint32_t ext_pc = t->cursor;
         uint16_t ext = rv_fetch16(t);
-        if (ext & 0x0100)
-            return 0;
+        if (ext & 0x0100) {
+            uint8_t a = full_extension(t, ext, 0, ext_pc);
+            if (!a)
+                return 0;
+            ea->kind = EA_MEM;
+            ea->base = a;
+            ea->base_is_tmp = 1;
+            return 1;
+        }
         uint8_t i = brief_index(t, ext);
         uint8_t b = rv_tmp(t);
         rv_emit_li(t, b, (int32_t)ext_pc);
-        rv_emit(t, rv_add(i, b, i));
+        rv_emit(t, rv_addw(i, b, i));               /* 32-bit wrap, canonical */
         rv_free(t, b);
         ea->kind = EA_MEM;
         ea->base = i;
