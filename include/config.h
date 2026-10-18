@@ -38,6 +38,19 @@
 #define EMU68_ARM_CACHE_SIZE    (4*1024*1024)
 #define EMU68_M68K_INSN_DEPTH   256
 #define EMU68_HOST_BIG_ENDIAN   1
+
+/*
+    Optional subsystems, set by the CMake options EMU68_FPU and EMU68_PPC.
+    Without the FPU, coprocessor instructions raise the Line-F exception, as on
+    a 68LC040. Without PPC, the WarpOS PowerPC translator is not built and the
+    ppc_enable boot argument is ignored.
+*/
+#ifndef EMU68_HAVE_FPU
+#define EMU68_HAVE_FPU          1
+#endif
+#ifndef EMU68_HAVE_PPC
+#define EMU68_HAVE_PPC          1
+#endif
 #define EMU68_HAS_SETEND        1
 #define EMU68_DEF_BRANCH_TAKEN  0
 #define EMU68_DEF_BRANCH_AUTO   1

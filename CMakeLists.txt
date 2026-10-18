@@ -15,8 +15,12 @@ endif()
 #set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 include(ExternalProject)
 
+option(EMU68_FPU "Build the 68881/68882/68040 FPU emulation" ON)
+option(EMU68_PPC "Build the PowerPC (WarpOS) translator and its ROM" ON)
+
 set(PPC_ROM_HEADER ${CMAKE_BINARY_DIR}/include/ppc_rom.h)
 
+if(EMU68_PPC)
 ExternalProject_Add(
     ppc_rom
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/src/ppc
@@ -28,6 +32,7 @@ ExternalProject_Add(
     INSTALL_COMMAND "" 
     BYPRODUCTS ${PPC_ROM_HEADER}
 )
+endif()
 
 include(cmake/verstring.cmake)
 include(cmake/firmware_download.cmake)
@@ -110,6 +115,11 @@ set(EMU68_FILES
     src/M68k_CC.c
     src/ExecutionLoop.c
     src/TranslatorContext.cpp
+    src/LRUCache.cpp
+    src/ReturnStack.cpp
+)
+
+set(PPC_FILES
     src/PPC_Translator.cpp
     src/PPC_ExecutionLoop.cpp
     src/PPC_TranslatorContext.cpp
@@ -117,9 +127,9 @@ set(EMU68_FILES
     src/PPC_FPU.cpp
     src/PPC_SystemInstructions.cpp
     src/PPC_Arithmetic.cpp
-    src/LRUCache.cpp
-    src/ReturnStack.cpp
-    
+)
+
+set(FPU_FILES
     src/math/__rem_pio2.c
     src/math/__rem_pio2_large.c
     src/math/__tan.c
@@ -152,6 +162,14 @@ set(EMU68_FILES
     src/math/remquo.c
     src/math/96bit.c
 )
+
+if(EMU68_PPC)
+    list(APPEND EMU68_FILES ${PPC_FILES})
+endif()
+if(EMU68_FPU)
+    list(APPEND EMU68_FILES ${FPU_FILES})
+endif()
+message("-- FPU emulation: ${EMU68_FPU}, PowerPC translator: ${EMU68_PPC}")
 
 set(OVERLAY_FILES
     src/overlays/emu68.dts
@@ -321,7 +339,9 @@ add_custom_command(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-add_dependencies(Emu68.elf ppc_rom)
+if(EMU68_PPC)
+    add_dependencies(Emu68.elf ppc_rom)
+endif()
 
 add_subdirectory(external)
 
@@ -329,6 +349,8 @@ target_link_libraries(Emu68.elf capstone_static libdeflate_static)
 target_include_directories(Emu68.elf PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/external/capstone/include)
 target_include_directories(Emu68.elf PRIVATE ${CMAKE_BINARY_DIR}/include)
 target_compile_definitions(Emu68.elf PRIVATE 
+    EMU68_HAVE_FPU=$<BOOL:${EMU68_FPU}>
+    EMU68_HAVE_PPC=$<BOOL:${EMU68_PPC}>
     EMU68_VERSION_MAJOR=${CMAKE_PROJECT_VERSION_MAJOR}
     EMU68_VERSION_MINOR=${CMAKE_PROJECT_VERSION_MINOR}
 )

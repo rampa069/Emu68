@@ -2448,9 +2448,11 @@ void IRQHandler(uint32_t , uint64_t *)
             */
             __asm__ volatile("msr CNTP_CTL_EL0, %0"::"r"(3));
 
+#if EMU68_HAVE_PPC
             void PPCReportInterrupt(int interrupt);
 
             PPCReportInterrupt(0x900);
+#endif
 
             if (gic_available()) {
                 gic_write_eoir(id);

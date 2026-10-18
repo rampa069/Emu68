@@ -459,17 +459,21 @@ void secondary_boot(void)
         }
     }
 
+#if EMU68_HAVE_PPC
     if (cpu_id == 3 && ppc_enable) {
         extern void InitPPC();
         InitPPC();
     }
+#endif
 
     __atomic_clear(&boot_lock, __ATOMIC_RELEASE);
 
+#if EMU68_HAVE_PPC
     if (cpu_id == 3 && ppc_enable) {
         extern void StartupPPC();
         StartupPPC();
     }
+#endif
 
 #ifdef PISTORM_ANY_MODEL
     if (cpu_id == 1)
@@ -563,7 +567,12 @@ void parse_cmdline(const char *cmdline)
     const char *tok;
 
     debug_not_implemented = !!find_token(cmdline, "debug_not_implemented");
+#if EMU68_HAVE_PPC
     ppc_enable = !!find_token(cmdline, "ppc_enable");
+#else
+    if (find_token(cmdline, "ppc_enable"))
+        kprintf("[BOOT] ppc_enable ignored: built without PowerPC support\n");
+#endif
     enable_cache = !!find_token(cmdline, "enable_cache");
     limit_2g = !!find_token(cmdline, "limit_2g");
 
@@ -1683,10 +1692,14 @@ void boot(void *dtree)
             if (ptr) {
                 if (GetELFMachine() == 20) {
                     /* Fire PPC */
+#if EMU68_HAVE_PPC
                     extern spinlock_t PPCStart;
                     extern uint32_t ppc_boot_addr;
                     ppc_boot_addr = (uint32_t)(uintptr_t)ptr;
                     spinlock_release(&PPCStart);
+#else
+                    kprintf("[BOOT] PowerPC executable, but built without PowerPC support\n");
+#endif
                 }
                 else
                 {
@@ -2275,8 +2288,10 @@ __asm__ volatile(
     __asm__ volatile("mov "CTX_POINTER_ASM", %0"::"r"(&__m68k));
 
     /* Fire PPC */
+#if EMU68_HAVE_PPC
     extern spinlock_t PPCStart;
     spinlock_release(&PPCStart);
+#endif
 
     /* Start M68k now */
 #ifndef PISTORM_ANY_MODEL

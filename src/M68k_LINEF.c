@@ -13,8 +13,14 @@
 #include "EmuFeatures.h"
 #include "lists.h"
 #include "tlsf.h"
+#include "config.h"
+#if EMU68_HAVE_FPU
 #include "math/libm.h"
+#endif
 #include "cache.h"
+
+#if EMU68_HAVE_FPU
+/* FPU support up to FPU_StoreData; the cache helpers below are always built */
 
 extern uint8_t reg_Load96;
 extern uint8_t reg_Save96;
@@ -1775,6 +1781,7 @@ void FPU_StoreData(struct TranslatorContext *ctx, uint8_t reg, uint16_t opcode,
         RA_FreeARMRegister(ctx, val_reg);
     }
 }
+#endif /* EMU68_HAVE_FPU */
 
 void clear_entire_dcache(void);
 /* Clean and invalidate entire data cache, code after ARMv8 architecture reference manual */
@@ -2082,6 +2089,7 @@ void __attribute__((used)) __trampoline_icache_invalidate(void)
     __asm__ volatile(".globl trampoline_icache_invalidate\ntrampoline_icache_invalidate: bl invalidate_instruction_cache\n\tbr x0");
 }
 
+#if EMU68_HAVE_FPU
 uint32_t EMIT_FPU(struct TranslatorContext *ctx)
 {
     uint16_t opcode = cache_read_16(ICACHE, (uintptr_t)&ctx->tc_M68kCodePtr[0]);
@@ -5226,6 +5234,7 @@ uint32_t EMIT_FPU(struct TranslatorContext *ctx)
 
     return insn_consumed;
 }
+#endif /* EMU68_HAVE_FPU */
 
 int DisableFPU = 0;
 
@@ -5236,9 +5245,13 @@ uint32_t EMIT_lineF(struct TranslatorContext *ctx)
     uint16_t opcode2 = cache_read_16(ICACHE, (uintptr_t)&ctx->tc_M68kCodePtr[1]);
 
     /* Check destination coprocessor - if it is FPU go to separate function */
-    if (DisableFPU == 0 && (opcode & 0x0e00) == 0x0200)
+    /* Without FPU support the condition is false and coprocessor opcodes fall
+       through to the Line-F exception at the end of this chain. */
+    if (EMU68_HAVE_FPU && DisableFPU == 0 && (opcode & 0x0e00) == 0x0200)
     {
+#if EMU68_HAVE_FPU
         return EMIT_FPU(ctx);
+#endif
     }
     /* PFLUSHA or PTEST - ignore */
     else if ((opcode & 0xffe0) == 0xf500 || (opcode & 0xffd8) == 0xf548)
