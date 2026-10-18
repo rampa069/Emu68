@@ -125,7 +125,7 @@ int rv_emit_stop(struct rv_tc *t)
     rv_emit_li(t, k, imm);
     rv_emit_write_sr(t, k);
     rv_emit_li(t, a, (int64_t)(intptr_t)&rv_jit_stopped);
-    rv_emit(t, rv_addi(k, RV_ZERO, 1));
+    rv_emit(t, rv_addi(k, RV_ZERO, RV_JIT_SERVICE_STOP));
     rv_emit(t, rv_sw(k, a, 0));
     rv_free(t, k);
     rv_free(t, a);

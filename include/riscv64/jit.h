@@ -73,6 +73,7 @@ struct rv_jit_stats {
     uint64_t executed;          /* units run from the C loop (trace) */
     uint64_t dispatches;        /* returns of the assembly dispatcher to C */
     uint64_t chains;            /* exit stubs chained */
+    uint64_t flushes;           /* translation cache drops (CINV, CPUSH) */
 };
 extern struct rv_jit_stats rv_jit_stats;
 

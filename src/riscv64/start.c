@@ -377,6 +377,8 @@ void boot(uint64_t hartid, void *dtb)
         (long)rv_jit_stats.executed);
     kprintf("[JIT] %ld returns from the dispatcher to C, %ld exits chained\n",
         (long)rv_jit_stats.dispatches, (long)rv_jit_stats.chains);
+    if (rv_jit_stats.flushes)
+        kprintf("[JIT] translation cache dropped %ld times (CINV, CPUSH)\n", (long)rv_jit_stats.flushes);
     if (rv_jit_stats.m68k_insns)
         kprintf("[JIT] Mean RV64 instructions per m68k instruction: %ld.%02ld\n",
             (long)(rv_jit_stats.rv_insns / rv_jit_stats.m68k_insns),

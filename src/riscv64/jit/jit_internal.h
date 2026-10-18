@@ -141,6 +141,7 @@ int rv_emit_sr_imm(struct rv_tc *t, uint16_t opcode);
 void rv_emit_write_sr(struct rv_tc *t, uint8_t val);   /* ends the unit */
 void rv_emit_priv_check(struct rv_tc *t);
 int rv_emit_stop(struct rv_tc *t);
+int rv_emit_line_f_040(struct rv_tc *t, uint16_t opcode);  /* cache040.c */
 void rv_emit_sp_switch(struct rv_tc *t, uint8_t old_sr, uint8_t new_sr);
 void rv_emit_sp_sync(struct rv_tc *t, int store);
 /* Take an exception with a format 0 or 2 frame; sets gp, caller ends the unit */
@@ -161,6 +162,15 @@ extern volatile uint32_t rv_jit_exception;
     chained exit does not pass through the dispatcher.
 */
 extern volatile uint32_t rv_jit_stopped;
+/*
+    Other values of rv_jit_stopped are service requests from a unit that
+    ended with a plain exit, handled by the dispatcher outside every unit.
+    RV_JIT_SERVICE_FLUSH (CINV or CPUSH of the instruction cache) drops all
+    translated code before going on at gp.
+*/
+#define RV_JIT_SERVICE_STOP     1
+#define RV_JIT_SERVICE_FLUSH    2
+void rv_jit_flush(void);
 struct M68KState;
 int rv_jit_stop_wait(struct M68KState *ctx);
 

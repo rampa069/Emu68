@@ -308,10 +308,19 @@ static int unsupported_exception(struct M68KState *ctx)
     return -1;
 }
 
-/* After STOP: 0 to go on at ctx->PC, -1 if STOP can never end */
+/*
+    After STOP or a service request (rv_jit_stopped): 0 to go on at ctx->PC,
+    -1 if STOP can never end
+*/
 static int stopped(struct M68KState *ctx)
 {
+    uint32_t why = rv_jit_stopped;
     rv_jit_stopped = 0;
+    if (why == RV_JIT_SERVICE_FLUSH) {
+        rv_jit_flush();
+        rv_jit_stats.flushes++;
+        return 0;
+    }
     return rv_jit_stop_wait(ctx) < 0 ? -1 : 0;
 }
 

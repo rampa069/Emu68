@@ -788,10 +788,11 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
         return rv_emit_trap(t, op);             /* Line-A */
     case 0xf:
         /* Line-F: the FPU (coprocessor 1) is not built, so its opcodes
-           trap; MOVE16, CINV, CPUSH, PFLUSH, PTEST are not translated yet */
-        if (((op >> 9) & 7) == 1)
-            return rv_emit_trap(t, op);
-        return 0;
+           trap; the 68040's CINV, CPUSH, PFLUSH, PTEST and MOVE16 are in
+           cache040.c, and any other opcode takes Line-F as on the 68040 */
+        if (((op >> 9) & 7) != 1 && rv_emit_line_f_040(t, op))
+            return 1;
+        return rv_emit_trap(t, op);
     default:
         return 0;
     }
