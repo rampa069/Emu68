@@ -20,6 +20,9 @@ set(RV64_FILES
     src/riscv64/mmu.c
     src/riscv64/traps.c
     src/riscv64/cache.c
+    src/riscv64/insn_decode.c
+    src/riscv64/mmio.c
+    src/riscv64/pl011_emu.c
     src/riscv-virt/start_virt.c
     src/riscv-virt/support_virt.c
     src/support.c

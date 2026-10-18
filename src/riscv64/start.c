@@ -28,6 +28,7 @@
 #include "cpu_relax.h"
 #include "version.h"
 #include "riscv64/mmu_rv.h"
+#include "riscv64/mmio.h"
 
 #define HEAP_SIZE       (16UL << 20)
 #define SZ_2M           (1UL << 21)
@@ -73,6 +74,89 @@ static int bytes_equal(const void *a, const void *b, uintptr_t n)
 static uintptr_t align_up(uintptr_t v, uintptr_t a)
 {
     return (v + a - 1) & ~(a - 1);
+}
+
+/*
+    m68k accesses exactly as the JIT emits them: the value is byte-swapped
+    between the m68k view and the bus, and the address is held sign-extended.
+*/
+static uint32_t m68k_read32(intptr_t a)
+{
+    uint64_t v;
+    __asm__ volatile("lw %0, 0(%1)\n\trev8 %0, %0\n\tsrai %0, %0, 32"
+                     : "=&r"(v) : "r"(a) : "memory");
+    return (uint32_t)v;
+}
+
+static void m68k_write32(intptr_t a, uint32_t v68)
+{
+    uint64_t t;
+    __asm__ volatile("rev8 %0, %1\n\tsrli %0, %0, 32\n\tsw %0, 0(%2)"
+                     : "=&r"(t) : "r"((uint64_t)v68), "r"(a) : "memory");
+}
+
+/* Compressed accesses need x8-x15, so pin the operands to a0 and a1. */
+static __attribute__((noinline)) uint64_t m68k_c_lw(intptr_t addr)
+{
+    register intptr_t a0 __asm__("a0") = addr;
+    register uint64_t a1 __asm__("a1");
+    __asm__ volatile(".option push\n\t.option rvc\n\tc.lw a1, 0(a0)\n\t.option pop"
+                     : "=r"(a1) : "r"(a0) : "memory");
+    return a1;
+}
+
+static __attribute__((noinline)) void m68k_c_sw(intptr_t addr, uint64_t value)
+{
+    register intptr_t a0 __asm__("a0") = addr;
+    register uint64_t a1 __asm__("a1") = value;
+    __asm__ volatile(".option push\n\t.option rvc\n\tc.sw a1, 0(a0)\n\t.option pop"
+                     :: "r"(a0), "r"(a1) : "memory");
+}
+
+static intptr_t m68k_addr(uint32_t a)
+{
+    return (intptr_t)(int32_t)a;     /* sign-extended, as in a JIT register */
+}
+
+/*
+    Exercise the emulated PL011 at 0xf2201000 the way the example programs
+    do (poll UARTFR, write LE32(c) to UARTDR), plus byte, signed and
+    compressed accesses. Returns 1 when every check passes.
+*/
+static int mmio_selftest(void)
+{
+    const uint32_t base = 0xf2201000;
+    int ok = 1;
+
+    static const char msg[] = "[MMIO] this line was written by m68k-style code to an emulated PL011\n";
+    for (const char *c = msg; *c; c++) {
+        while (__builtin_bswap32(m68k_read32(m68k_addr(base + 0x18))) & 0x20)
+            ;   /* the program reads FR through its LE32() helper */
+        m68k_write32(m68k_addr(base), __builtin_bswap32((uint32_t)(uint8_t)*c));
+    }
+
+    /* Byte loads of the identification registers, zero and sign extended. */
+    uint64_t id0, pcell3;
+    __asm__ volatile("lbu %0, 0(%1)" : "=r"(id0) : "r"((uintptr_t)base + 0xfe0) : "memory");
+    __asm__ volatile("lb %0, 0(%1)" : "=r"(pcell3) : "r"(m68k_addr(base + 0xffc)) : "memory");
+    kprintf("[MMIO] UARTPeriphID0 %02lx, UARTPCellID3 as lb %016lx\n", id0, pcell3);
+    ok &= id0 == 0x11;
+    ok &= pcell3 == 0xffffffffffffffb1UL;
+
+    /* Compressed forms: c.lw of UARTFR and c.sw to UARTDR. */
+    uint64_t fr = m68k_c_lw(m68k_addr(base + 0x18));
+    kprintf("[MMIO] UARTFR via c.lw %lx\n", fr);
+    ok &= fr == 0x90;
+
+    struct mmio_device *dev = mmio_find_device(base);
+    uint64_t writes = dev ? dev->writes : 0;
+    static const char tail[] = "[MMIO] and this one through c.sw\n";
+    for (const char *c = tail; *c; c++)
+        m68k_c_sw(m68k_addr(base), (uint8_t)*c);
+    ok &= dev && dev->writes - writes == sizeof(tail) - 1;
+
+    kprintf("[MMIO] self-test %s\n", ok ? "passed" : "FAILED");
+    return ok;
 }
 
 void boot(uint64_t hartid, void *dtb)
@@ -147,18 +231,10 @@ void boot(uint64_t hartid, void *dtb)
 
     platform_init();
 
-    /*
-        Write through the m68k view of the UART at 0xf2201000, using the
-        address in the sign-extended form translated code will hold.
-    */
-    {
-        volatile uint8_t *m68k_uart = (volatile uint8_t *)(intptr_t)(int32_t)0xf2201000;
-        static const char msg[] = "[BOOT] m68k window check: this line went through 0xf2201000\n";
-        for (const char *c = msg; *c; c++) {
-            if (*c == '\n')
-                m68k_uart[0] = '\r';
-            m68k_uart[0] = (uint8_t)*c;
-        }
+    of_property_t *args = dt_find_property(dt_find_node("/chosen"), "bootargs");
+    if (args && find_token(args->op_value, "mmio_selftest")) {
+        if (!mmio_selftest())
+            sbi_shutdown(1);
     }
 
     if (initrd == NULL) {

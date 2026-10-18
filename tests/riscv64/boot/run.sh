@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Boot the RV64 Emu68 runtime on QEMU riscv virt with a HUNK executable as
-# initrd and check the loaded image against hunk_reference.py.
+# initrd, run the MMIO self-test (emulated PL011 at m68k 0xf2201000) and
+# check the loaded image against hunk_reference.py.
 #
 # Usage: tests/riscv64/boot/run.sh <Emu68.elf> <hunk-file>
 set -euo pipefail
@@ -15,7 +16,7 @@ trap 'kill "${QPID:-}" 2>/dev/null || true; rm -rf "${WORK}"' EXIT
 
 "${QEMU}" -M virt -m 512 -display none -no-shutdown \
     -monitor "unix:${WORK}/mon,server,nowait" -serial "file:${WORK}/serial" \
-    -kernel "${ELF}" -initrd "${PROG}" &
+    -kernel "${ELF}" -initrd "${PROG}" -append "mmio_selftest" &
 QPID=$!
 
 for ((i = 0; i < 300; i++)); do
@@ -28,6 +29,8 @@ if grep -q "\[TRAP\]" "${WORK}/serial"; then
     echo "boot: trapped"
     exit 1
 fi
+# QEMU exits with status 0 even when SBI reports a failure, so check the log.
+grep -q "\[MMIO\] self-test passed" "${WORK}/serial" || { echo "boot: MMIO self-test failed"; exit 1; }
 grep -q "matches the HUNK_CODE data" "${WORK}/serial" || { echo "boot: entry check failed"; exit 1; }
 
 phys=$(sed -n 's/.*m68k RAM 0x00000000-.* at physical \(0x[0-9a-f]*\).*/\1/p' "${WORK}/serial")

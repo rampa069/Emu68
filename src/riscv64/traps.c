@@ -9,17 +9,16 @@
 /*
     Supervisor trap handler, the RV64 counterpart of src/aarch64/vectors.c.
 
-    For now every trap is reported and the hart stops. The next steps are
-    emulating m68k accesses to unmapped addresses (load/store page faults
-    with the m68k address in stval, decoded from the instruction at sepc as
-    SYSPageFaultReadHandler/WriteHandler do on AArch64) and the timer and
-    external interrupts.
+    Load and store page faults in the m68k window are offered to the MMIO
+    emulation first (src/riscv64/mmio.c). Everything else is reported and
+    the hart stops; timer and external interrupts are still to come.
 */
 
 #include <stdint.h>
 #include "support.h"
 #include "cpu_relax.h"
 #include "riscv64/traps.h"
+#include "riscv64/mmio.h"
 
 static const char *cause_name(uint64_t scause)
 {
@@ -54,6 +53,9 @@ void trap_handler(struct trap_frame *f)
     uint64_t scause, stval;
     __asm__ volatile("csrr %0, scause" : "=r"(scause));
     __asm__ volatile("csrr %0, stval" : "=r"(stval));
+
+    if ((scause == 13 || scause == 15) && mmio_handle_fault(f, scause, stval))
+        return;
 
     kprintf("[TRAP] %s (scause %lx) at %p, stval %p\n",
         cause_name(scause), scause, (void *)f->sepc, (void *)stval);

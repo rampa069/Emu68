@@ -38,6 +38,12 @@ static void putByte(void *io_base, char chr)
     uart[UART_THR << uart_shift] = (uint8_t)chr;
 }
 
+/* Raw console output, used by the emulated PL011. */
+void virt_console_putc(char c)
+{
+    putByte(NULL, c);
+}
+
 void kprintf(const char * restrict format, ...)
 {
     va_list v;

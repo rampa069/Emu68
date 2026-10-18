@@ -9,25 +9,26 @@
 /*
     Platform set-up for qemu-system-riscv64 -M virt.
 
-    As on the AArch64 virt target, the console UART is also mapped into the
-    m68k address space at 0xf2201000. That address is above 0x80000000, so
-    it is reached through the sign-extension mirror, which makes it a useful
-    end-to-end check of the m68k window.
+    m68k programs written for the RasPi and the AArch64 virt target print
+    through a PL011 at 0xf2201000. QEMU riscv virt has an NS16550 instead, so
+    that page is left unmapped and an emulated PL011 (src/riscv64/pl011_emu.c)
+    answers the faults and forwards characters to the console.
 */
 
 #include <stdint.h>
 #include "support.h"
-#include "mmu.h"
-#include "riscv64/mmu_rv.h"
+#include "riscv64/mmio.h"
 
-extern uintptr_t virt_uart_phys;
+#define M68K_PL011_ADDR 0xf2201000
 
-#define M68K_UART_ADDR 0xf2201000
+void virt_console_putc(char c);
+
+static struct mmio_device pl011;
 
 void platform_init()
 {
-    if (virt_uart_phys)
-        mmu_map(virt_uart_phys & ~0xfffUL, M68K_UART_ADDR, 0x1000, RV_MMU_RW, 0);
+    pl011_emu_init(&pl011, M68K_PL011_ADDR, virt_console_putc);
+    mmio_register(&pl011);
 }
 
 void platform_post_init()
