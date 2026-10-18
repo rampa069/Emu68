@@ -135,6 +135,7 @@ int rv_emit_exg(struct rv_tc *t, uint16_t opcode);
 int rv_emit_cmpm(struct rv_tc *t, uint16_t opcode);
 int rv_emit_movep(struct rv_tc *t, uint16_t opcode);
 int rv_emit_pack_unpk(struct rv_tc *t, uint16_t opcode);
+int rv_emit_chk2(struct rv_tc *t, uint16_t opcode);
 int rv_emit_sr_imm(struct rv_tc *t, uint16_t opcode);
 /* SR and stack pointers (exception.c) */
 void rv_emit_write_sr(struct rv_tc *t, uint8_t val);   /* ends the unit */

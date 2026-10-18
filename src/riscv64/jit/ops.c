@@ -731,6 +731,8 @@ int rv_emit_insn(struct rv_tc *t, uint16_t op)
             return rv_emit_cas(t, op);          /* CAS, CAS2 (cas.c) */
         if ((op & 0x0138) == 0x0108)
             return rv_emit_movep(t, op);        /* MOVEP (misc.c) */
+        if ((op & 0xf9c0) == 0x00c0 && (op & 0x0600) != 0x0600)
+            return rv_emit_chk2(t, op);         /* CHK2, CMP2 (chk2.c) */
         if ((op & 0x0100) || (op & 0xff00) == 0x0800)
             return op_bit(t, op);
         return op_immediate(t, op);
