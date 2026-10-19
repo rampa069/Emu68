@@ -32,6 +32,7 @@
 #include "riscv64/mmio.h"
 #include "riscv64/jit.h"
 #include "riscv64/timer.h"
+#include "riscv64/plic.h"
 
 #define HEAP_SIZE       (16UL << 20)
 #define SZ_2M           (1UL << 21)
@@ -384,6 +385,9 @@ void boot(uint64_t hartid, void *dtb)
             (long)(rv_jit_stats.rv_insns / rv_jit_stats.m68k_insns),
             (long)(rv_jit_stats.rv_insns * 100 / rv_jit_stats.m68k_insns % 100));
     kprintf("[JIT] Time in m68k code: %ld us\n", (long)((t1 - t0) * 1000000 / timebase));
+    if (rv_plic_active())
+        kprintf("[JIT] PLIC: %ld sources claimed, %ld spurious external interrupts\n",
+            (long)rv_plic_stats.claims, (long)rv_plic_stats.spurious);
     if (timer_us || rv_irq_stats.stops) {
         kprintf("[JIT] Timer ticks: %ld, STOPs: %ld, interrupts taken:", (long)rv_timer_ticks,
             (long)rv_irq_stats.stops);

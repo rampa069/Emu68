@@ -46,6 +46,7 @@ set(RV64_FILES
     src/riscv64/jit/chk2.c
     src/riscv64/jit/cache040.c
     src/riscv64/jit/interrupt.c
+    src/riscv64/plic.c
     src/riscv-virt/start_virt.c
     src/riscv-virt/support_virt.c
     src/support.c

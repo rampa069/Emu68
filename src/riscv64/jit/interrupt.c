@@ -36,6 +36,7 @@
 #include "M68k.h"
 #include "riscv64/jit.h"
 #include "riscv64/timer.h"
+#include "riscv64/plic.h"
 
 static inline volatile uint8_t *m68k_ptr(uint32_t a)
 {
@@ -148,14 +149,14 @@ int rv_jit_stop_wait(struct M68KState *ctx)
         __asm__ volatile("csrc sstatus, %0" :: "r"(1ul << 1) : "memory");
         if (ctx->INT64 && rv_jit_interrupt(ctx))
             break;
-        if (!rv_timer_running()) {
+        if (!rv_timer_running() && !rv_plic_active()) {
             kprintf("[JIT] STOP at %08x with no interrupt pending and no interrupt source\n", ctx->PC);
             return -1;
         }
         __asm__ volatile("wfi" ::: "memory");
         __asm__ volatile("csrs sstatus, %0" :: "r"(1ul << 1) : "memory");
     }
-    if (rv_timer_running())
+    if (rv_timer_running() || rv_plic_active())
         __asm__ volatile("csrs sstatus, %0" :: "r"(1ul << 1) : "memory");
     return 1;
 }

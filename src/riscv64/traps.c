@@ -12,8 +12,9 @@
     Supervisor timer interrupts go to src/riscv64/timer.c. Load and store
     page faults in the m68k window are offered to the MMIO emulation
     (src/riscv64/mmio.c). Everything else is reported and the machine is
-    shut down through SBI with a failure status; external interrupts (PLIC)
-    are not enabled yet.
+    shut down through SBI with a failure status. External interrupts go to
+    the PLIC (src/riscv64/plic.c), enabled only for the devices attached to
+    it (the console with the serial_irq boot option).
 */
 
 #include <stdint.h>
@@ -22,6 +23,7 @@
 #include "riscv64/traps.h"
 #include "riscv64/mmio.h"
 #include "riscv64/timer.h"
+#include "riscv64/plic.h"
 
 static const char *cause_name(uint64_t scause)
 {
@@ -59,6 +61,10 @@ void trap_handler(struct trap_frame *f)
 
     if (scause == ((1ul << 63) | 5)) {
         rv_timer_interrupt();
+        return;
+    }
+    if (scause == ((1ul << 63) | 9) && rv_plic_active()) {
+        rv_plic_interrupt();
         return;
     }
     if ((scause == 13 || scause == 15) && mmio_handle_fault(f, scause, stval))

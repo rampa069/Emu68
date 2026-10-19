@@ -58,6 +58,8 @@ void systimer_emu_init(struct mmio_device *dev, uint32_t base, uint64_t timebase
 void ipltest_emu_init(struct mmio_device *dev, uint32_t base);
 
 /* PL011 model forwarding transmitted characters to putc. */
-void pl011_emu_init(struct mmio_device *dev, uint32_t base, void (*putc)(char));
+/* getc returns the next received byte or -1; getc and rx_ready may be NULL */
+void pl011_emu_init(struct mmio_device *dev, uint32_t base, void (*putc)(char),
+                    int (*getc)(void), int (*rx_ready)(void));
 
 #endif /* _EMU68_RISCV64_MMIO_H */

@@ -19,12 +19,57 @@
 #include "riscv64/mmu_rv.h"
 
 #define UART_THR 0
+#define UART_RBR 0
+#define UART_IER 1
 #define UART_LSR 5
+#define LSR_DR   0x01
 #define LSR_THRE 0x20
 
 static volatile uint8_t *uart;
 static int uart_shift;
 uintptr_t virt_uart_phys;
+of_node_t *virt_uart_node;
+
+/*
+    Console input, with the serial_irq boot option: the 16550's receive
+    interrupt, through the PLIC, moves every byte into this queue, which the
+    emulated PL011 hands to the m68k side (UARTDR, UARTFR.RXFE). A full
+    queue drops the newest bytes.
+*/
+#define RX_SIZE 256
+static volatile uint8_t rx_buf[RX_SIZE];
+static volatile uint32_t rx_head, rx_tail;
+volatile uint64_t virt_console_rx_bytes, virt_console_rx_dropped;
+
+void virt_console_rx_drain(void)
+{
+    while (uart[UART_LSR << uart_shift] & LSR_DR) {
+        uint8_t c = uart[UART_RBR << uart_shift];
+        virt_console_rx_bytes++;
+        if (rx_head - rx_tail < RX_SIZE)
+            rx_buf[rx_head++ % RX_SIZE] = c;
+        else
+            virt_console_rx_dropped++;
+    }
+}
+
+int virt_console_getc(void)
+{
+    if (rx_head == rx_tail)
+        return -1;
+    return rx_buf[rx_tail++ % RX_SIZE];
+}
+
+int virt_console_rx_ready(void)
+{
+    return rx_head != rx_tail;
+}
+
+void virt_console_rx_enable(void)
+{
+    if (uart)
+        uart[UART_IER << uart_shift] |= 0x01;      /* received data available */
+}
 
 static void putByte(void *io_base, char chr)
 {
@@ -87,6 +132,7 @@ void setup_serial()
     if (uart_node == NULL)
         return;
 
+    virt_uart_node = uart_node;
     virt_uart_phys = reg_address(uart_node);
     uart_shift = dt_get_property_value_u32(uart_node, "reg-shift", 0, FALSE);
     uart = (volatile uint8_t *)RV_PHYS_TO_VIRT(virt_uart_phys);
